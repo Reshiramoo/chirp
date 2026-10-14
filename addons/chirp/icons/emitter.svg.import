@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bqj4p26yssrty"
-path="res://.godot/imported/emitter.svg-791fc829de61d90935d8275914a7cf16.ctex"
+uid="uid://bu0i3pb2jiejh"
+path="res://.godot/imported/emitter.svg-7569b4ea6ac0b246a7a9d5b287a8ebc4.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://addons/audio_events/icons/emitter.svg"
-dest_files=["res://.godot/imported/emitter.svg-791fc829de61d90935d8275914a7cf16.ctex"]
+source_file="res://addons/chirp/icons/emitter.svg"
+dest_files=["res://.godot/imported/emitter.svg-7569b4ea6ac0b246a7a9d5b287a8ebc4.ctex"]
 
 [params]
 

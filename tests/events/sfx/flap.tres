@@ -1,8 +1,0 @@
-[gd_resource type="Resource" script_class="AudioEvent" format=3]
-
-[ext_resource type="Script" path="res://addons/audio_events/resources/audio_event.gd" id="1"]
-
-[resource]
-script = ExtResource("1")
-bus = "bus:/SFX"
-volume_db = -3.0

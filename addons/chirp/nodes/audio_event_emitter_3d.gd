@@ -1,4 +1,4 @@
-@icon("res://addons/audio_events/icons/emitter.svg")
+@icon("res://addons/chirp/icons/emitter.svg")
 class_name AudioEventEmitter3D
 extends Node3D
 ## Plays an AudioEvent at this node's position, following it as it moves.

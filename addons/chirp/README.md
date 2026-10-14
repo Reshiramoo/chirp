@@ -5,7 +5,7 @@ No native libraries, so it runs anywhere Godot does (desktop, Android, iOS, web)
 
 ## Install
 
-1. Copy `addons/audio_events` into your project.
+1. Copy `addons/chirp` into your project.
 2. **Project → Project Settings → Plugins** → enable **Audio Events**. This adds the `AudioEvents` autoload.
 3. Optional: create an `AudioEventsConfig` resource, save it as `res://audio/audio_events_config.tres`
    (or point the `audio_events/config` project setting at it) to set the events folder,
