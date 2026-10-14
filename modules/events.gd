@@ -66,11 +66,34 @@ func get_event(event_or_path: Variant) -> ChirpEvent:
 		return event_or_path
 	var entry: Variant = _entries.get(String(event_or_path))
 	if entry == null:
-		push_error("Chirp: unknown event '%s'." % event_or_path)
+		push_error("Chirp: unknown event '%s'.%s" % [event_or_path, _unknown_hint(String(event_or_path))])
 		return null
 	if entry.event == null:
 		entry.event = _load_event(entry.path, entry.bus)
 	return entry.event
+
+
+## Known paths that end the same way as [param event_path], e.g. "event:/audio/coin" for "event:/coin".
+func suggest_paths(event_path: String) -> PackedStringArray:
+	var tail := "/" + event_path.trim_prefix(EVENT_PREFIX).trim_prefix("/")
+	var matches := PackedStringArray()
+	for known: String in _entries:
+		if known.ends_with(tail) or known.to_lower().ends_with(tail.to_lower()):
+			matches.append(known)
+	matches.sort()
+	return matches
+
+
+func _unknown_hint(event_path: String) -> String:
+	var matches := suggest_paths(event_path)
+	if not matches.is_empty():
+		var quoted := PackedStringArray()
+		for known in matches.slice(0, 3):
+			quoted.append("'%s'" % known)
+		return " Did you mean %s? Paths start with the sound directory's folder name." % " or ".join(quoted)
+	if _entries.is_empty():
+		return " No events found: check the \"chirp/sound_directories\" project setting."
+	return ""
 
 
 func create_instance(event_or_path: Variant) -> ChirpEventInstance:

@@ -88,6 +88,10 @@ then the file's path inside it without its extension.
 | `res://assets/sounds/sfxs/ui/click.ogg` | `"event:/sfxs/ui/click"` |
 | `res://assets/sounds/bgms/main.tres` (a ChirpEvent) | `"event:/bgms/main"` |
 
+The folder name is part of the path: with the default `res://audio` directory, `res://audio/coin.mp3`
+is `"event:/audio/coin"`, not `"event:/coin"`. An unknown path reports an error suggesting the
+closest known paths, and the **Chirp** dock lists every path.
+
 Plain audio files (`.wav`, `.ogg`, `.mp3`) play as they are, on their directory's bus.
 When a sound needs more, create a [ChirpEvent](docs/classes/ChirpEvent.md) resource. Saved next
 to an audio file with the same name, it takes over that path. Events built in code can be given

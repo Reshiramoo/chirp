@@ -41,6 +41,7 @@ Every method that takes `event_or_path` accepts a [ChirpEvent](ChirpEvent.md) or
 | void | [register_event](#method-register_event)(event_path: String, event: [ChirpEvent](ChirpEvent.md)) |
 | void | [scan](#method-scan)(directories: Dictionary) |
 | void | [stop_all](#method-stop_all)(allow_fadeout: bool = true) |
+| PackedStringArray | [suggest_paths](#method-suggest_paths)(event_path: String) |
 
 ## Constants
 
@@ -80,7 +81,9 @@ its instances.
 ### [ChirpEvent](ChirpEvent.md) get_event(event_or_path: Variant)
 
 The event behind a path, loading it if needed. Given a ChirpEvent, returns it unchanged.
-Returns `null` and reports an error for an unknown path.
+Returns `null` and reports an error for an unknown path. The error suggests known paths that end
+the same way (see [suggest_paths()](#method-suggest_paths)), e.g. `"event:/audio/coin"` for
+`"event:/coin"`.
 
 ---
 
@@ -148,3 +151,15 @@ Clears events added with [register_event()](#method-register_event).
 ### void stop_all(allow_fadeout: bool = true)
 
 Stops every active instance. With `allow_fadeout`, each plays its envelope's release first.
+
+---
+
+<a id="method-suggest_paths"></a>
+### PackedStringArray suggest_paths(event_path: String)
+
+Known paths ending with the same path segments as `event_path` (case-insensitive), sorted. Useful
+when a path is missing its sound directory's folder name or its `event:/` prefix:
+
+```gdscript
+Chirp.events.suggest_paths("event:/coin")  # ["event:/audio/coin"] with the default res://audio
+```
