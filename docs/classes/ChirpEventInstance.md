@@ -62,6 +62,7 @@ footsteps.start()
 | void | [set_parameter_by_label](#method-set_parameter_by_label)(parameter_name: String, label: String) |
 | void | [set_paused](#method-set_paused)(paused: bool) |
 | void | [set_position](#method-set_position)(position: Variant) |
+| void | [set_programmer_sound](#method-set_programmer_sound)(key: String, stream: AudioStream) |
 | void | [set_timeline_position](#method-set_timeline_position)(position: float) |
 | void | [start](#method-start)() |
 | void | [stop](#method-stop)(allow_fadeout: bool = true) |
@@ -72,6 +73,27 @@ footsteps.start()
 ### destroyed()
 
 Emitted once, when a released instance is destroyed (see [release()](#method-release)).
+
+---
+
+<a id="signal-programmer_sound_requested"></a>
+### programmer_sound_requested(key: String, instrument: [ChirpInstrument](ChirpInstrument.md))
+
+A PROGRAMMER instrument is about to play and asks for its sound by
+[programmer_key](ChirpInstrument.md#property-programmer_key). Emitted synchronously, every time the
+instrument triggers: call [set_programmer_sound()](#method-set_programmer_sound) from the handler to
+supply it. Requests from nested events are re-emitted on their parent.
+
+If no sound is set for the key after the signal, Chirp asks
+[Chirp.events.programmer_sound_provider](ChirpEvents.md#property-programmer_sound_provider); if that
+gives nothing either, the instrument plays nothing (with a warning).
+
+```gdscript
+var line := Chirp.create_instance("event:/voice/npc_line")
+line.programmer_sound_requested.connect(func(key: String, _instrument: ChirpInstrument) -> void:
+	line.set_programmer_sound(key, load("res://voice/%s/%s.ogg" % [TranslationServer.get_locale(), dialogue_id])))
+line.start()
+```
 
 ---
 
@@ -300,6 +322,15 @@ paused (see [ChirpMixer.set_bus_paused()](ChirpMixer.md#method-set_bus_paused)).
 Plays the event at a fixed position: a `Vector2` for 2D, a `Vector3` for 3D. Can be called every
 frame to move it. Stops following a node set with [attach_to()](#method-attach_to). Call before
 [start()](#method-start) to choose between 2D and 3D: players already playing keep their type.
+
+---
+
+<a id="method-set_programmer_sound"></a>
+### void set_programmer_sound(key: String, stream: AudioStream)
+
+Supplies the sound for PROGRAMMER instruments with this `key`, before [start()](#method-start) or
+from [programmer_sound_requested](#signal-programmer_sound_requested). It is kept for later triggers
+and shared with nested events. Pass `null` to forget it.
 
 ---
 

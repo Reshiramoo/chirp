@@ -244,5 +244,5 @@ The local parameter with this name (case-insensitive), or `null`.
 ### bool is_one_shot()
 
 `true` when the event ends by itself: not [persistent](#property-persistent), no looping
-instruments, and (on a TIMELINE event) no loop regions or sustain points. Emitters use this to
+instruments, no scatterers without a `spawn_total`, and (on a TIMELINE event) no loop regions or sustain points. Emitters use this to
 decide between stacking one-shots and restarting looping sounds.

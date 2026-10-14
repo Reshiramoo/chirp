@@ -351,8 +351,11 @@ static func instrument_label(instrument: ChirpInstrument) -> String:
 			if instrument.event == null:
 				return "(no event)"
 			return instrument.event.resource_path.get_file().get_basename() if instrument.event.resource_path else "nested event"
+		ChirpInstrument.Kind.PROGRAMMER:
+			return "programmer: %s" % instrument.programmer_key if instrument.programmer_key else "programmer"
 	var named := instrument.streams.filter(func(s: AudioStream) -> bool: return s != null)
 	if named.is_empty():
 		return "(no sound)"
 	var first: String = named[0].resource_path.get_file() if named[0].resource_path else "sound"
-	return first if named.size() == 1 else "%s +%d" % [first, named.size() - 1]
+	var label := first if named.size() == 1 else "%s +%d" % [first, named.size() - 1]
+	return "scatter: " + label if instrument.kind == ChirpInstrument.Kind.SCATTERER else label

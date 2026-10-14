@@ -19,6 +19,8 @@ const INSTRUMENT_COLORS := {
 	ChirpInstrument.Kind.SOUND: Color(0.36, 0.6, 0.95),
 	ChirpInstrument.Kind.EVENT: Color(0.68, 0.48, 0.95),
 	ChirpInstrument.Kind.SILENCE: Color(0.55, 0.55, 0.58),
+	ChirpInstrument.Kind.SCATTERER: Color(0.35, 0.78, 0.6),
+	ChirpInstrument.Kind.PROGRAMMER: Color(0.95, 0.66, 0.3),
 }
 const MARKER_COLORS := {
 	ChirpMarker.Kind.MARKER: Color(0.45, 0.7, 1.0),

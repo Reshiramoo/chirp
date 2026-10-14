@@ -58,13 +58,14 @@ enum Stealing {
 @export var max_distance_3d := 0.0
 
 
-## True when the event ends by itself: not persistent, no looping instruments,
-## and no loop regions or sustain points.
+## True when the event ends by itself: not persistent, no looping instruments, no endless
+## scatterers, and no loop regions or sustain points.
 func is_one_shot() -> bool:
 	if persistent:
 		return false
 	for instrument in instruments:
-		if instrument and instrument.loop:
+		if instrument and (instrument.loop and instrument.kind in [ChirpInstrument.Kind.SOUND, ChirpInstrument.Kind.PROGRAMMER]
+				or instrument.kind == ChirpInstrument.Kind.SCATTERER and instrument.spawn_total == 0):
 			return false
 	if sheet_mode == SheetMode.TIMELINE:
 		for marker in markers:

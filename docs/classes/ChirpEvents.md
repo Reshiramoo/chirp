@@ -27,6 +27,12 @@ Every method that takes `event_or_path` accepts a [ChirpEvent](ChirpEvent.md) or
 
 - [Events and event paths](../../README.md#events-and-event-paths)
 
+## Properties
+
+| Type | Name | Default |
+|---|---|---|
+| Callable | [programmer_sound_provider](#property-programmer_sound_provider) | `Callable()` |
+
 ## Methods
 
 | Return | Signature |
@@ -48,6 +54,22 @@ Every method that takes `event_or_path` accepts a [ChirpEvent](ChirpEvent.md) or
 - **EVENT_PREFIX** = `"event:/"`
 - **AUDIO_EXTENSIONS** = `["wav", "ogg", "mp3"]`: audio files picked up by [scan()](#method-scan).
 - **RESOURCE_EXTENSIONS** = `["tres", "res"]`: resource files picked up by [scan()](#method-scan).
+
+## Property Descriptions
+
+<a id="property-programmer_sound_provider"></a>
+### Callable programmer_sound_provider = `Callable()`
+
+Supplies sounds for PROGRAMMER instruments that their instance didn't get one for, e.g. a lookup of
+localised dialogue by key. Called as `func(key: String, instance: ChirpEventInstance) -> AudioStream`;
+return `null` for no sound. Works with [play_one_shot()](#method-play_one_shot), where there is no
+chance to connect to the instance first.
+
+```gdscript
+Chirp.events.programmer_sound_provider = func(key: String, _instance: ChirpEventInstance) -> AudioStream:
+	return load("res://voice/%s/%s.ogg" % [TranslationServer.get_locale(), key])
+Chirp.play_one_shot("event:/voice/bark") # its programmer instrument's key picks the file
+```
 
 ## Method Descriptions
 

@@ -2,7 +2,8 @@
 
 **Inherits:** [Resource](https://docs.godotengine.org/en/stable/classes/class_resource.html)
 
-Something a [ChirpEvent](ChirpEvent.md) plays: a sound, a playlist, a nested event or a silence.
+Something a [ChirpEvent](ChirpEvent.md) plays: a sound, a playlist, a nested event, a silence, a
+scatterer or a programmer sound.
 
 ## Description
 
@@ -10,6 +11,25 @@ A `SOUND` instrument with one stream is FMOD's single instrument; with several s
 multi instrument, picking one stream per trigger according to [selection](#property-selection).
 An `EVENT` instrument plays another ChirpEvent inside this one, and a `SILENCE` instrument plays
 nothing for its [duration](#property-duration), e.g. a gap in a consecutive sheet.
+
+A `SCATTERER` keeps playing sounds from its [streams](#property-streams) at random intervals and,
+on spatial events, at random positions around the event: rain, birds, distant gunfire. A
+`PROGRAMMER` instrument plays a sound that game code supplies when it triggers: dialogue lines,
+localised voice-over, user content (see
+[ChirpEventInstance.programmer_sound_requested](ChirpEventInstance.md#signal-programmer_sound_requested)).
+
+```gdscript
+# Birdsong around the player: one bird every 2 to 6 s, at most 3 at once, 5 to 20 m away.
+var birds := ChirpInstrument.new()
+birds.kind = ChirpInstrument.Kind.SCATTERER
+birds.streams = [preload("res://audio/bird_1.ogg"), preload("res://audio/bird_2.ogg")]
+birds.spawn_interval_min = 2.0
+birds.spawn_interval_max = 6.0
+birds.polyphony = 3
+birds.scatter_distance_min = 5.0
+birds.scatter_distance_max = 20.0
+birds.random_pitch_semitones = 2.0
+```
 
 The inspector only shows the properties the chosen [kind](#property-kind) uses.
 
@@ -33,10 +53,17 @@ The inspector only shows the properties the chosen [kind](#property-kind) uses.
 | float | [length](#property-length) | `0.0` |
 | bool | [loop](#property-loop) | `false` |
 | float | [pitch_semitones](#property-pitch_semitones) | `0.0` |
+| int | [polyphony](#property-polyphony) | `0` |
 | float | [probability](#property-probability) | `100.0` |
+| String | [programmer_key](#property-programmer_key) | `""` |
 | float | [random_pitch_semitones](#property-random_pitch_semitones) | `0.0` |
 | float | [random_volume_db](#property-random_volume_db) | `0.0` |
+| float | [scatter_distance_max](#property-scatter_distance_max) | `0.0` |
+| float | [scatter_distance_min](#property-scatter_distance_min) | `0.0` |
 | [Selection](#enum-selection) | [selection](#property-selection) | `SHUFFLE` |
+| float | [spawn_interval_max](#property-spawn_interval_max) | `3.0` |
+| float | [spawn_interval_min](#property-spawn_interval_min) | `1.0` |
+| int | [spawn_total](#property-spawn_total) | `0` |
 | float | [start](#property-start) | `0.0` |
 | Array[AudioStream] | [streams](#property-streams) | `[]` |
 | float | [volume_db](#property-volume_db) | `0.0` |
@@ -57,6 +84,12 @@ The inspector only shows the properties the chosen [kind](#property-kind) uses.
 - **EVENT** = `1`: plays another [ChirpEvent](ChirpEvent.md) inside this one. Parameters with the
   same name are linked: the nested event receives the parent's values.
 - **SILENCE** = `2`: plays nothing for its [duration](#property-duration).
+- **SCATTERER** = `3`: plays its [streams](#property-streams) one after another at random intervals
+  ([spawn_interval_min](#property-spawn_interval_min)..[spawn_interval_max](#property-spawn_interval_max)),
+  each at a random position around the event. The first sound plays as soon as it triggers. It
+  keeps going until it is stopped or has played [spawn_total](#property-spawn_total) sounds.
+- **PROGRAMMER** = `4`: plays a sound supplied by game code when it triggers, looked up by
+  [programmer_key](#property-programmer_key). Plays nothing (with a warning) if none is supplied.
 
 ---
 
@@ -77,7 +110,8 @@ How a playlist (several streams) picks the next stream.
 What happens when the instrument's condition stops holding, or a timeline jump leaves it.
 
 - **STOP** = `0`: stop at once.
-- **PLAY_TO_END** = `1`: let the current sound finish.
+- **PLAY_TO_END** = `1`: let the current sound finish. A scatterer stops spawning and lets the
+  sounds already playing finish.
 
 ## Property Descriptions
 
@@ -85,7 +119,8 @@ What happens when the instrument's condition stops holding, or a timeline jump l
 ### bool async_playback = `false`
 
 TIMELINE events: once triggered, play to the sound's own end instead of following the playhead
-(not stopped when the playhead leaves, not re-seeked by jumps).
+(not stopped when the playhead leaves, not re-seeked by jumps). An async scatterer stops spawning
+when the playhead leaves, and lets its sounds finish.
 
 ---
 
@@ -155,15 +190,16 @@ What the instrument plays. See [Kind](#enum-kind).
 ### float length = `0.0`
 
 TIMELINE events: how long the instrument stays on the timeline, in the event's timeline units.
-`0` = the length of its longest stream (or its duration, for SILENCE); a nested event with length
-`0` never leaves the timeline: it plays until it ends by itself.
+`0` = the length of its longest stream (or its duration, for SILENCE); a nested event, scatterer
+or programmer instrument with length `0` never leaves the timeline: it plays until it ends by
+itself. Give scatterers a length on timelines.
 
 ---
 
 <a id="property-loop"></a>
 ### bool loop = `false`
 
-SOUND: replay when the stream finishes, until the event is stopped. For gapless loops, enable
+SOUND and PROGRAMMER: replay when the stream finishes, until the event is stopped. For gapless loops, enable
 looping in the stream's import settings instead.
 
 ---
@@ -175,6 +211,14 @@ Pitch offset in semitones.
 
 ---
 
+<a id="property-polyphony"></a>
+### int polyphony = `0`
+
+SCATTERER: the most sounds playing at once. A spawn due while it is full is skipped (and doesn't
+count toward [spawn_total](#property-spawn_total)). `0` = unlimited.
+
+---
+
 <a id="property-probability"></a>
 ### float probability = `100.0`
 
@@ -182,27 +226,73 @@ Chance, in percent, that the instrument plays each time it is triggered.
 
 ---
 
+<a id="property-programmer_key"></a>
+### String programmer_key = `""`
+
+PROGRAMMER: the name game code is asked for. Several instruments can share a key.
+
+---
+
 <a id="property-random_pitch_semitones"></a>
 ### float random_pitch_semitones = `0.0`
 
-SOUND: each trigger is detuned by a random amount within ± this many semitones.
+SOUND, SCATTERER, PROGRAMMER: each trigger (for a scatterer, each scattered sound) is detuned by a
+random amount within ± this many semitones.
 
 ---
 
 <a id="property-random_volume_db"></a>
 ### float random_volume_db = `0.0`
 
-Each trigger is quieter by a random amount up to this many dB.
+Each trigger (for a scatterer, each scattered sound) is quieter by a random amount up to this many dB.
+
+---
+
+<a id="property-scatter_distance_max"></a>
+### float scatter_distance_max = `0.0`
+
+SCATTERER: the furthest a sound is placed from the event, in pixels (2D) or meters (3D). Each
+sound keeps its offset from the event as the event moves. Non-spatial events ignore it.
+
+---
+
+<a id="property-scatter_distance_min"></a>
+### float scatter_distance_min = `0.0`
+
+SCATTERER: the nearest a sound is placed to the event.
 
 ---
 
 <a id="property-selection"></a>
 ### [Selection](#enum-selection) selection = `SHUFFLE`
 
-SOUND with several streams: how the next one is picked. See [Selection](#enum-selection).
+SOUND and SCATTERER with several streams: how the next one is picked. See [Selection](#enum-selection).
 
 **Note:** playlist state is stored on the instrument, so it is shared by every instance of the
 event (as in FMOD).
+
+---
+
+<a id="property-spawn_interval_max"></a>
+### float spawn_interval_max = `3.0`
+
+SCATTERER: the longest wait between two sounds, in seconds. Each wait is random between
+[spawn_interval_min](#property-spawn_interval_min) and this.
+
+---
+
+<a id="property-spawn_interval_min"></a>
+### float spawn_interval_min = `1.0`
+
+SCATTERER: the shortest wait between two sounds, in seconds.
+
+---
+
+<a id="property-spawn_total"></a>
+### int spawn_total = `0`
+
+SCATTERER: how many sounds to play before it ends (once the last one finishes). `0` = until it is
+stopped; such an event never ends by itself.
 
 ---
 
@@ -216,7 +306,7 @@ TIMELINE events: where the instrument starts on the timeline, in the event's tim
 <a id="property-streams"></a>
 ### Array[AudioStream] streams = `[]`
 
-SOUND: the stream, or the playlist of streams.
+SOUND: the stream, or the playlist of streams. SCATTERER: the sounds it picks from.
 
 ---
 
@@ -231,7 +321,7 @@ Volume offset in dB.
 ### float get_length()
 
 SOUND: the longest stream's length in seconds (`0` if unknown). SILENCE: its
-[duration](#property-duration). EVENT: `0`.
+[duration](#property-duration). EVENT, SCATTERER, PROGRAMMER: `0` (not known in advance).
 
 ---
 

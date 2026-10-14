@@ -3,11 +3,15 @@ class_name ChirpInstrument
 extends Resource
 ## Something an event plays. One stream = FMOD "single instrument";
 ## several streams = "multi instrument" (a playlist picked from on every trigger).
+## A scatterer plays its streams at random intervals and positions; a programmer
+## instrument plays a sound that game code supplies when it triggers.
 
 enum Kind {
 	SOUND, ## Plays one of its streams.
 	EVENT, ## Plays another ChirpEvent inside this one. Parameters with the same name are linked.
 	SILENCE, ## Plays nothing for its duration (e.g. a gap in a consecutive sheet).
+	SCATTERER, ## Keeps playing its streams at random intervals, scattered around the event (rain, birds).
+	PROGRAMMER, ## Plays a sound supplied by game code at trigger time (dialogue, localisation).
 }
 
 enum Selection { SHUFFLE, RANDOM, SEQUENTIAL }
@@ -24,8 +28,8 @@ enum CutBehavior {
 @export var streams: Array[AudioStream] = []
 ## SHUFFLE plays every entry once in random order and never repeats back-to-back.
 @export var selection := Selection.SHUFFLE
-## Replays when it finishes until the event is stopped. For gapless loops,
-## enable looping in the stream's import settings instead.
+## Replays when it finishes until the event is stopped (SOUND and PROGRAMMER). For gapless
+## loops, enable looping in the stream's import settings instead.
 @export var loop := false
 @export_range(-80.0, 24.0, 0.1, "suffix:dB") var volume_db := 0.0
 @export_range(-24.0, 24.0, 0.01, "suffix:st") var pitch_semitones := 0.0
@@ -33,6 +37,22 @@ enum CutBehavior {
 @export var event: ChirpEvent
 ## How long a SILENCE instrument lasts.
 @export_range(0.0, 60.0, 0.01, "or_greater", "suffix:s") var duration := 1.0
+## PROGRAMMER: the name game code is asked for (see ChirpEventInstance.programmer_sound_requested).
+@export var programmer_key := ""
+
+@export_group("Scatterer")
+## Shortest time between two scattered sounds.
+@export_range(0.0, 60.0, 0.01, "or_greater", "suffix:s") var spawn_interval_min := 1.0
+## Longest time between two scattered sounds.
+@export_range(0.0, 60.0, 0.01, "or_greater", "suffix:s") var spawn_interval_max := 3.0
+## Most scattered sounds playing at once; a spawn is skipped while full. 0 = unlimited.
+@export_range(0, 64) var polyphony := 0
+## Sounds to play before the scatterer ends. 0 = until it is stopped.
+@export_range(0, 1000, 1, "or_greater") var spawn_total := 0
+## Nearest a scattered sound is placed to the event (pixels in 2D, meters in 3D). Spatial events only.
+@export_range(0.0, 1000.0, 0.01, "or_greater") var scatter_distance_min := 0.0
+## Furthest a scattered sound is placed from the event.
+@export_range(0.0, 1000.0, 0.01, "or_greater") var scatter_distance_max := 0.0
 
 @export_group("Timeline")
 ## Where the instrument starts on a TIMELINE event, in the event's timeline units.
@@ -60,8 +80,13 @@ enum CutBehavior {
 @export var cut_behavior := CutBehavior.STOP
 
 const _KIND_FIELDS := {
-	"streams": Kind.SOUND, "selection": Kind.SOUND, "loop": Kind.SOUND,
-	"random_pitch_semitones": Kind.SOUND, "event": Kind.EVENT, "duration": Kind.SILENCE,
+	"streams": [Kind.SOUND, Kind.SCATTERER], "selection": [Kind.SOUND, Kind.SCATTERER],
+	"loop": [Kind.SOUND, Kind.PROGRAMMER],
+	"random_pitch_semitones": [Kind.SOUND, Kind.SCATTERER, Kind.PROGRAMMER],
+	"event": [Kind.EVENT], "duration": [Kind.SILENCE], "programmer_key": [Kind.PROGRAMMER],
+	"spawn_interval_min": [Kind.SCATTERER], "spawn_interval_max": [Kind.SCATTERER],
+	"polyphony": [Kind.SCATTERER], "spawn_total": [Kind.SCATTERER],
+	"scatter_distance_min": [Kind.SCATTERER], "scatter_distance_max": [Kind.SCATTERER],
 }
 
 # Playlist state is shared by every instance of the event, like FMOD's.
@@ -98,6 +123,7 @@ func pick_stream() -> AudioStream:
 
 
 ## Longest stream, in seconds (0 if unknown); SILENCE gives its duration.
+## SCATTERER, PROGRAMMER and EVENT give 0: their length isn't known in advance.
 func get_length() -> float:
 	match kind:
 		Kind.SILENCE:
@@ -112,5 +138,5 @@ func get_length() -> float:
 
 
 func _validate_property(property: Dictionary) -> void:
-	if _KIND_FIELDS.has(property.name) and _KIND_FIELDS[property.name] != kind:
+	if _KIND_FIELDS.has(property.name) and kind not in _KIND_FIELDS[property.name]:
 		property.usage = PROPERTY_USAGE_NO_EDITOR

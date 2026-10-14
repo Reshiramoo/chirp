@@ -27,6 +27,11 @@ var _listener_3d := Transform3D.IDENTITY
 var _listener_3d_velocity := Vector3.ZERO
 var _listener_ready := false
 
+## Supplies sounds for PROGRAMMER instruments that their instance didn't get one for:
+## [code]func(key: String, instance: ChirpEventInstance) -> AudioStream[/code]. E.g. a lookup of
+## localised dialogue by key.
+var programmer_sound_provider := Callable()
+
 
 func _init(chirp: Node) -> void:
 	_chirp = chirp

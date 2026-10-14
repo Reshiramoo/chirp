@@ -15,6 +15,9 @@ signal destroyed
 signal timeline_marker(marker_name: String, position: float)
 ## The playhead crossed a beat. Bars and beats count from 1, starting at the current TEMPO marker.
 signal timeline_beat(bar: int, beat: int, position: float, tempo: float, time_signature: Vector2i)
+## A PROGRAMMER instrument is about to play and asks for its sound. Emitted synchronously:
+## call set_programmer_sound(key, stream) from the handler to supply it.
+signal programmer_sound_requested(key: String, instrument: ChirpInstrument)
 
 enum State { STOPPED, PLAYING, STOPPING }
 
@@ -54,6 +57,7 @@ var _previous_position: Variant = null
 var _velocity: Variant = null # Vector2 or Vector3, from position changes
 var _lfo_seed := 0
 var _has_built_ins := false
+var _programmer_sounds := {} # programmer key -> AudioStream; shared with nested instances
 
 # Timeline playback (TIMELINE events only)
 var _timeline: Timeline
@@ -67,14 +71,26 @@ var _entry_done := {} # timeline entry index -> true once triggered for this pas
 
 
 class Voice:
-	var player # AudioStreamPlayer, AudioStreamPlayer2D or AudioStreamPlayer3D (SOUND)
+	var player # AudioStreamPlayer, AudioStreamPlayer2D or AudioStreamPlayer3D (SOUND, PROGRAMMER)
 	var child: ChirpEventInstance # EVENT
 	var silence_left := 0.0 # SILENCE
+	var scattered: Array[Scattered] = [] # SCATTERER: sounds playing
+	var next_spawn := 0.0 # SCATTERER: seconds until the next spawn
+	var spawned := 0 # SCATTERER: sounds started so far
+	var spawning := true # SCATTERER: false once spawn_total is reached or it was cut
 	var gain := 1.0
 	var pitch := 1.0
 	var instrument: ChirpInstrument
 	var entry := -1 # timeline entry index, -1 when not following the timeline
 	var detached := false # left to play to its end, no longer controlled
+
+
+## One sound started by a SCATTERER voice.
+class Scattered:
+	var player
+	var gain := 1.0
+	var pitch := 1.0
+	var offset: Variant = null # Vector2 / Vector3 from the event's position, null when not spatial
 
 
 class Pending:
@@ -253,6 +269,15 @@ func set_timeline_position(position: float) -> void:
 		_jumped = false
 
 
+## Supplies the sound for PROGRAMMER instruments with this [param key]. Kept for later triggers
+## and shared with nested events. Pass null to forget it.
+func set_programmer_sound(key: String, stream: AudioStream) -> void:
+	if stream:
+		_programmer_sounds[key] = stream
+	else:
+		_programmer_sounds.erase(key)
+
+
 ## Releases the sustain point currently holding the playhead.
 func key_off() -> void:
 	if _sustain:
@@ -293,11 +318,17 @@ func _process(delta: float) -> void:
 		_advance_timeline(delta)
 		_sync_entries()
 	for voice in _voices.duplicate():
+		if not _voices.has(voice):
+			continue # removed by an earlier voice this frame
 		if voice.instrument.kind == ChirpInstrument.Kind.SILENCE:
 			voice.silence_left -= delta
 			if voice.silence_left <= 0.0:
 				_on_voice_finished(voice)
-		elif voice.entry == -1 and not voice.detached and not _instrument_condition(voice.instrument):
+			continue
+		if voice.instrument.kind == ChirpInstrument.Kind.SCATTERER:
+			_step_scatterer(voice, delta)
+		if _voices.has(voice) and voice.entry == -1 and not voice.detached \
+				and not _instrument_condition(voice.instrument):
 			_cut(voice)
 
 	if _state == State.STOPPING:
@@ -548,9 +579,14 @@ func _condition(parameter_name: String, lo: float, hi: float) -> bool:
 func _trigger(instrument: ChirpInstrument, offset := 0.0) -> Voice:
 	var voice := Voice.new()
 	voice.instrument = instrument
-	voice.gain = db_to_linear(instrument.volume_db - randf() * instrument.random_volume_db)
-	var detune := randf_range(-instrument.random_pitch_semitones, instrument.random_pitch_semitones)
-	voice.pitch = pow(2.0, (instrument.pitch_semitones + detune) / 12.0)
+	if instrument.kind == ChirpInstrument.Kind.SCATTERER:
+		# Randomized per scattered sound instead (see _spawn).
+		voice.gain = db_to_linear(instrument.volume_db)
+		voice.pitch = pow(2.0, instrument.pitch_semitones / 12.0)
+	else:
+		voice.gain = db_to_linear(instrument.volume_db - randf() * instrument.random_volume_db)
+		var detune := randf_range(-instrument.random_pitch_semitones, instrument.random_pitch_semitones)
+		voice.pitch = pow(2.0, (instrument.pitch_semitones + detune) / 12.0)
 	match instrument.kind:
 		ChirpInstrument.Kind.SILENCE:
 			voice.silence_left = instrument.duration - offset
@@ -560,18 +596,35 @@ func _trigger(instrument: ChirpInstrument, offset := 0.0) -> Voice:
 		ChirpInstrument.Kind.EVENT:
 			if not _start_child(voice, offset):
 				return null
+		ChirpInstrument.Kind.SCATTERER:
+			if not _start_scatterer(voice):
+				return null
+		ChirpInstrument.Kind.PROGRAMMER:
+			if not _start_player(voice, offset, _programmer_stream(instrument)):
+				return null
 		_:
-			if not _start_player(voice, offset):
+			if not _start_player(voice, offset, instrument.pick_stream()):
 				return null
 	return voice
 
 
-func _start_player(voice: Voice, offset: float) -> bool:
-	var stream := voice.instrument.pick_stream()
+func _start_player(voice: Voice, offset: float, stream: AudioStream) -> bool:
 	if stream == null:
 		return false
 	if offset > 0.0 and stream.get_length() > 0.0 and offset >= stream.get_length():
 		return false
+	var player = _new_player(stream)
+	voice.player = player
+	_voices.append(voice)
+	_apply(voice, _automation(ChirpAutomation.Target.VOLUME), _automation(ChirpAutomation.Target.PITCH))
+	player.finished.connect(_on_voice_finished.bind(voice))
+	player.play(offset)
+	player.stream_paused = _applied_paused
+	return true
+
+
+## A player of the right kind for this instance (plain, 2D or 3D), on its bus, in the tree.
+func _new_player(stream: AudioStream) -> Node:
 	var player # AudioStreamPlayer, AudioStreamPlayer2D or AudioStreamPlayer3D
 	match _spatial:
 		Spatial.SPATIAL_2D:
@@ -588,14 +641,90 @@ func _start_player(voice: Voice, offset: float) -> bool:
 			player = AudioStreamPlayer.new()
 	player.stream = stream
 	player.bus = _bus
-	voice.player = player
-	_voices.append(voice)
 	_chirp._voice_root.add_child(player)
+	return player
+
+
+## PROGRAMMER: asks game code for the sound (signal, then this instance's sounds, then the
+## Chirp.events.programmer_sound_provider). Null when nobody supplies one.
+func _programmer_stream(instrument: ChirpInstrument) -> AudioStream:
+	var key := instrument.programmer_key
+	programmer_sound_requested.emit(key, instrument)
+	var stream: AudioStream = _programmer_sounds.get(key)
+	if stream == null and _chirp.events.programmer_sound_provider.is_valid():
+		var provided: Variant = _chirp.events.programmer_sound_provider.call(key, self)
+		stream = provided as AudioStream
+	if stream == null:
+		_chirp._warn_once("programmer:%s:%s" % [_event.resource_path, key],
+			"Chirp: no sound supplied for programmer instrument '%s'." % key)
+	return stream
+
+
+# --- scatterer ----------------------------------------------------------------------
+
+func _start_scatterer(voice: Voice) -> bool:
+	if voice.instrument.streams.filter(func(s: AudioStream) -> bool: return s != null).is_empty():
+		return false
+	_voices.append(voice)
+	_step_scatterer(voice, 0.0) # the first sound plays straight away
+	return _voices.has(voice)
+
+
+## Counts down to the next spawn and spawns; ends the voice once it is done spawning and silent.
+func _step_scatterer(voice: Voice, delta: float) -> void:
+	var instrument := voice.instrument
+	voice.next_spawn -= delta
+	while voice.spawning and voice.next_spawn <= 0.0:
+		if instrument.spawn_total > 0 and voice.spawned >= instrument.spawn_total:
+			voice.spawning = false
+			break
+		if instrument.polyphony <= 0 or voice.scattered.size() < instrument.polyphony:
+			_spawn(voice)
+		voice.next_spawn += maxf(randf_range(instrument.spawn_interval_min,
+			maxf(instrument.spawn_interval_max, instrument.spawn_interval_min)), 0.01)
+	if not voice.spawning and voice.scattered.is_empty():
+		_on_voice_finished(voice)
+
+
+func _spawn(voice: Voice) -> void:
+	var instrument := voice.instrument
+	var stream := instrument.pick_stream()
+	if stream == null:
+		return
+	var sound := Scattered.new()
+	sound.gain = db_to_linear(-randf() * instrument.random_volume_db)
+	sound.pitch = pow(2.0, randf_range(-instrument.random_pitch_semitones, instrument.random_pitch_semitones) / 12.0)
+	sound.offset = _scatter_offset(instrument)
+	sound.player = _new_player(stream)
+	voice.scattered.append(sound)
+	voice.spawned += 1
 	_apply(voice, _automation(ChirpAutomation.Target.VOLUME), _automation(ChirpAutomation.Target.PITCH))
-	player.finished.connect(_on_voice_finished.bind(voice))
-	player.play(offset)
-	player.stream_paused = _applied_paused
-	return true
+	sound.player.finished.connect(_on_scattered_finished.bind(voice, sound))
+	sound.player.play()
+	sound.player.stream_paused = _applied_paused
+
+
+## A random offset between the instrument's scatter distances, in any direction.
+func _scatter_offset(instrument: ChirpInstrument) -> Variant:
+	var distance := randf_range(instrument.scatter_distance_min,
+		maxf(instrument.scatter_distance_max, instrument.scatter_distance_min))
+	match _spatial:
+		Spatial.SPATIAL_2D:
+			return Vector2.RIGHT.rotated(randf() * TAU) * distance
+		Spatial.SPATIAL_3D:
+			var direction := Vector3.ZERO
+			while direction.length_squared() < 0.0001 or direction.length_squared() > 1.0:
+				direction = Vector3(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), randf_range(-1.0, 1.0))
+			return direction.normalized() * distance
+	return null
+
+
+func _on_scattered_finished(voice: Voice, sound: Scattered) -> void:
+	voice.scattered.erase(sound)
+	if is_instance_valid(sound.player):
+		sound.player.queue_free()
+	if _voices.has(voice) and not voice.spawning and voice.scattered.is_empty():
+		_on_voice_finished(voice)
 
 
 func _start_child(voice: Voice, offset: float) -> bool:
@@ -611,6 +740,8 @@ func _start_child(voice: Voice, offset: float) -> bool:
 	elif _position != null:
 		child.set_position(_position)
 	child._attenuation = _attenuation
+	child._programmer_sounds = _programmer_sounds
+	child.programmer_sound_requested.connect(programmer_sound_requested.emit)
 	voice.child = child
 	_link_parameters(child)
 	child.stopped.connect(_on_voice_finished.bind(voice))
@@ -660,6 +791,9 @@ func _detach(voice: Voice) -> void:
 	_entry_voices.erase(voice.entry)
 	voice.entry = -1
 	voice.detached = true
+	voice.spawning = false # a detached scatterer lets its sounds finish but starts no more
+	if voice.instrument.kind == ChirpInstrument.Kind.SCATTERER and voice.scattered.is_empty():
+		_on_voice_finished(voice)
 
 
 func _stop_voice(voice: Voice) -> void:
@@ -669,6 +803,11 @@ func _stop_voice(voice: Voice) -> void:
 		voice.player.queue_free()
 	elif voice.child:
 		voice.child.stop(false)
+	for sound in voice.scattered:
+		if is_instance_valid(sound.player):
+			sound.player.stop()
+			sound.player.queue_free()
+	voice.scattered.clear()
 
 
 func _remove_voice(voice: Voice) -> void:
@@ -687,17 +826,23 @@ func _apply(voice: Voice, volume_factor: float, pitch_factor: float) -> void:
 	var gain := _get_level() * voice.gain * volume_factor
 	var final_pitch := maxf(_event.pitch_scale * pitch * voice.pitch * pitch_factor, 0.01)
 	if voice.player:
-		var player = voice.player
-		player.volume_db = linear_to_db(gain) if gain > 0.00001 else -80.0
-		player.pitch_scale = final_pitch
-		if _position is Vector2 and player is AudioStreamPlayer2D:
-			player.global_position = _position
-		elif _position is Vector3 and player is AudioStreamPlayer3D:
-			player.global_position = _position
+		_apply_player(voice.player, gain, final_pitch, null)
 	elif voice.child:
 		voice.child.volume = gain
 		voice.child.pitch = final_pitch
 		_link_parameters(voice.child)
+	for sound in voice.scattered:
+		if is_instance_valid(sound.player):
+			_apply_player(sound.player, gain * sound.gain, maxf(final_pitch * sound.pitch, 0.01), sound.offset)
+
+
+func _apply_player(player, gain: float, final_pitch: float, offset: Variant) -> void:
+	player.volume_db = linear_to_db(gain) if gain > 0.00001 else -80.0
+	player.pitch_scale = final_pitch
+	if _position is Vector2 and player is AudioStreamPlayer2D:
+		player.global_position = _position + (offset if offset is Vector2 else Vector2.ZERO)
+	elif _position is Vector3 and player is AudioStreamPlayer3D:
+		player.global_position = _position + (offset if offset is Vector3 else Vector3.ZERO)
 
 
 func _automation(target: ChirpAutomation.Target) -> float:
@@ -834,6 +979,9 @@ func _sync_pause() -> void:
 			voice.player.stream_paused = paused
 		elif voice.child:
 			voice.child.set_paused(paused)
+		for sound in voice.scattered:
+			if is_instance_valid(sound.player):
+				sound.player.stream_paused = paused
 
 
 func _finish_stop() -> void:

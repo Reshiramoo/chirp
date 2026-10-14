@@ -19,6 +19,7 @@ No native libraries, so it runs anywhere Godot does (desktop, Android, iOS, web)
 - [Installation](#installation)
 - [Quick start](#quick-start)
 - [Events and event paths](#events-and-event-paths)
+  - [Scatterer and programmer instruments](#scatterer-and-programmer-instruments)
 - [Playing events from code](#playing-events-from-code)
 - [Instances and their lifecycle](#instances-and-their-lifecycle)
 - [Parameters](#parameters)
@@ -101,7 +102,7 @@ A ChirpEvent is a list of [ChirpInstrument](docs/classes/ChirpInstrument.md)s pl
 
 | ChirpEvent property | Meaning |
 |---|---|
-| `instruments` | What plays. A `SOUND` instrument has one stream (single sound) or several (playlist: shuffle / random / sequential); `EVENT` nests another event; `SILENCE` waits. Per-instrument volume, pitch, random volume/pitch, delay, probability, a parameter condition and a cut behaviour. |
+| `instruments` | What plays. A `SOUND` instrument has one stream (single sound) or several (playlist: shuffle / random / sequential); `EVENT` nests another event; `SILENCE` waits; `SCATTERER` plays sounds at random intervals and positions; `PROGRAMMER` plays a sound game code supplies. Per-instrument volume, pitch, random volume/pitch, delay, probability, a parameter condition and a cut behaviour. |
 | `sheet_mode` | `SIMULTANEOUS` triggers all instruments; `CONSECUTIVE` plays them one after another; `TIMELINE` places them on a timeline. |
 | `persistent` | Keep playing after the content ends, until stopped. |
 | `bus` | Bus path; empty = its sound directory's bus. |
@@ -111,6 +112,28 @@ A ChirpEvent is a list of [ChirpInstrument](docs/classes/ChirpInstrument.md)s pl
 | `envelope` | [ChirpEnvelope](docs/classes/ChirpEnvelope.md) (AHDSR). `release` is the fade-out used by `stop()`. |
 | `max_instances` / `stealing` / `cooldown` | Voice limits: steal oldest, quietest, furthest, or refuse. |
 
+### Scatterer and programmer instruments
+
+A **scatterer** keeps spawning sounds from its playlist, every `spawn_interval_min` to
+`spawn_interval_max` seconds, with at most `polyphony` at once and, if set, `spawn_total` in all. On
+a spatial event each sound lands `scatter_distance_min` to `scatter_distance_max` away from the
+event and keeps that offset as it moves: rain on a roof, birds in a forest, distant battle.
+
+A **programmer** instrument plays whatever sound game code supplies for its `programmer_key` when
+it triggers, so one event can carry the volume, bus, envelope and 3D settings for every dialogue line:
+
+```gdscript
+var line := Chirp.create_instance("event:/voice/npc")
+line.set_programmer_sound("line", load("res://voice/en/intro_01.ogg"))
+line.start()
+
+# Or answer on demand, which also works for one-shots:
+Chirp.events.programmer_sound_provider = func(key: String, _instance) -> AudioStream:
+	return load("res://voice/%s/%s.ogg" % [TranslationServer.get_locale(), key])
+```
+
+Instances also emit `programmer_sound_requested(key, instrument)` just before the lookup.
+
 ## Playing events from code
 
 The [Chirp](docs/classes/Chirp.md) autoload has shortcuts for the common calls; everything else is
@@ -118,7 +141,7 @@ grouped by module:
 
 | Module | Calls |
 |---|---|
-| [`Chirp.events`](docs/classes/ChirpEvents.md) | `get_event`, `get_event_paths`, `get_event_file`, `register_event`, `create_instance`, `play_one_shot`, `play_one_shot_attached`, `get_active_instances`, `stop_all`, `scan` |
+| [`Chirp.events`](docs/classes/ChirpEvents.md) | `programmer_sound_provider`, `get_event`, `get_event_paths`, `get_event_file`, `register_event`, `create_instance`, `play_one_shot`, `play_one_shot_attached`, `get_active_instances`, `stop_all`, `scan` |
 | [`Chirp.mixer`](docs/classes/ChirpMixer.md) | `set_bus_volume`, `get_bus_volume`, `set_bus_mute`, `set_bus_paused`, `stop_bus_events`, `resolve_bus`, `set_vca_volume`, `get_vca_volume`, `start_snapshot`, `get_active_snapshots`, `stop_all_snapshots`, `pause_all`, `mute_all` |
 | [`Chirp.parameters`](docs/classes/ChirpParameters.md) | `set_value`, `set_label`, `get_value` (global parameters) |
 
