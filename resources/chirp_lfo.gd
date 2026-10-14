@@ -1,4 +1,5 @@
 @tool
+@icon("res://addons/chirp/icons/lfo.svg")
 class_name ChirpLFO
 extends Resource
 ## Low-frequency oscillator that modulates an event's volume or pitch over time,

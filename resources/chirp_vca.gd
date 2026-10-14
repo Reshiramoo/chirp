@@ -1,4 +1,5 @@
 @tool
+@icon("res://addons/chirp/icons/vca.svg")
 class_name ChirpVCA
 extends Resource
 ## A volume control over several buses that does not route audio itself,

@@ -1,12 +1,14 @@
 @tool
 extends EditorDock
-## Bottom dock with a visual editor for TIMELINE events (instruments as blocks, markers as
-## flags and regions, a beat/bar grid from the tempo markers, the preview playhead) and
-## PARAMETER sheets (instruments along the sheet parameter's range, with their fades; the
-## preview's parameter value as the playhead). Every edit goes through the editor's undo/redo.
+## The Chirp Event bottom dock: edit and audition the selected event or snapshot in one place.
+## The toolbar has the transport (play, stop, key off) and status; the side panel has parameter
+## sliders and a beat/marker log. TIMELINE events and PARAMETER sheets are shown and edited
+## visually (instruments as blocks, markers as flags and regions, the playhead or sheet value);
+## other events and snapshots are auditioned only. Every edit goes through the editor's undo/redo.
 
 const TimelineView := preload("timeline_view.gd")
 const TimelineModel := preload("timeline_model.gd")
+const PreviewPanel := preload("preview_panel.gd")
 
 const ADD_INSTRUMENT := 100
 const DELETE := 200
@@ -14,8 +16,11 @@ const INSPECT := 201
 const RENAME := 202
 
 var _plugin: EditorPlugin
-var _preview_dock: Node # the Chirp Preview dock, for the playhead and seeking
+var _chirp: Node # the editor's preview copy of Chirp
+var _preview: PreviewPanel
+var _status: Label
 var _event: ChirpEvent
+var _item_label := "" # what the transport plays when it isn't a timeline (snapshot, other event)
 var _view: TimelineView
 var _title: Label
 var _snap: OptionButton
@@ -29,25 +34,35 @@ var _renaming: ChirpMarker
 var _shown_mode := -1 # sheet mode the view was set up for; switching it re-runs edit()
 
 
-func setup(plugin: EditorPlugin, preview_dock: Node) -> void:
+func setup(plugin: EditorPlugin, chirp: Node) -> void:
 	_plugin = plugin
-	_preview_dock = preview_dock
-	title = "Chirp Timeline"
+	_chirp = chirp
+	title = "Chirp Event"
 	_set_dock_icon(self, "timeline.svg")
-	layout_key = "chirp_timeline"
+	layout_key = "chirp_event"
 	default_slot = DOCK_SLOT_BOTTOM
 	available_layouts = DOCK_LAYOUT_HORIZONTAL | DOCK_LAYOUT_FLOATING
 	custom_minimum_size.y = 260
+	_preview = PreviewPanel.new()
+	_preview.setup(chirp)
 
 	var box := VBoxContainer.new()
 	add_child(box)
 	var toolbar := HBoxContainer.new()
 	box.add_child(toolbar)
 	_title = Label.new()
-	_title.text = "No timeline or parameter sheet event selected"
+	_title.text = "Select an event or snapshot"
 	_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_title.clip_text = true
+	_title.custom_minimum_size.x = 80 * EditorInterface.get_editor_scale()
 	toolbar.add_child(_title)
+	toolbar.add_child(_preview.transport)
+	_status = Label.new()
+	_status.add_theme_color_override(&"font_color", EditorInterface.get_editor_theme().get_color(&"disabled_font_color", &"Editor"))
+	_status.custom_minimum_size.x = 170 * EditorInterface.get_editor_scale()
+	_status.clip_text = true
+	toolbar.add_child(_status)
+	toolbar.add_child(VSeparator.new())
 
 	var snap_label := Label.new()
 	snap_label.text = "Snap"
@@ -79,11 +94,20 @@ func setup(plugin: EditorPlugin, preview_dock: Node) -> void:
 	_tool_button(toolbar, "Save", "Save the event", func() -> void:
 		if _event and not _event.resource_path.is_empty():
 			ResourceSaver.save(_event))
+	var panel_toggle := _tool_button(toolbar, "HSlider", "Show the parameters and log", func() -> void: pass)
+	panel_toggle.toggle_mode = true
+	panel_toggle.button_pressed = true
+	panel_toggle.toggled.connect(func(on: bool) -> void: _preview.visible = on)
 
+	var split := HSplitContainer.new()
+	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	box.add_child(split)
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	box.add_child(scroll)
+	split.add_child(scroll)
+	split.add_child(_preview)
 	_view = TimelineView.new()
 	_view.model.set_display_scale(EditorInterface.get_editor_scale())
 	_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -96,15 +120,38 @@ func setup(plugin: EditorPlugin, preview_dock: Node) -> void:
 	_view.seek_requested.connect(_seek)
 	_view.drop_requested.connect(_on_drop)
 	_view.rename_requested.connect(_start_rename)
+	_view.play_toggle_requested.connect(_preview.toggle_play)
 
 	var hint := Label.new()
-	hint.text = "Drop audio files to add (Shift: as one playlist) · double-click or F2 renames a marker · drag to move · drag edges to resize · Shift: no snap · right-click to add · Del deletes · Ctrl/Cmd+wheel zooms · Shift+wheel scrolls · click the ruler to seek"
+	hint.text = "Space plays/stops · drop audio files to add (Shift: as one playlist) · double-click or F2 renames a marker · drag to move · drag edges to resize · Shift: no snap · right-click to add · Del deletes · Ctrl/Cmd+wheel zooms · Shift+wheel scrolls · click the ruler to seek"
 	hint.add_theme_color_override(&"font_color", EditorInterface.get_editor_theme().get_color(&"disabled_font_color", &"Editor"))
 	hint.clip_text = true
 	box.add_child(hint)
 
 	_context.id_pressed.connect(func(id: int) -> void: _on_add(id, _context_unit))
 	add_child(_context)
+
+
+## Shows an event path, ChirpEvent or ChirpSnapshot: ready to audition, and editable when it's
+## a TIMELINE event or PARAMETER sheet.
+func show_item(item: Variant) -> void:
+	if not (item is String or item is ChirpEvent or item is ChirpSnapshot):
+		return # VCAs, global parameters...: nothing to audition
+	var event := _preview.show_item(item)
+	if item is ChirpSnapshot:
+		_item_label = "Snapshot: %s" % (item.name if item.name else "(unnamed)")
+	elif item is String:
+		_item_label = item
+	else:
+		_item_label = ""
+	edit(event)
+
+
+## Shows [param item] and plays it, bringing the dock to the front.
+func play_item(item: Variant) -> void:
+	make_visible()
+	show_item(item)
+	_preview.play()
 
 
 ## Shows [param event] if its sheet mode is TIMELINE or PARAMETER.
@@ -116,10 +163,16 @@ func edit(event: ChirpEvent) -> void:
 	var editable := _is_editable(event)
 	_view.model.event = event if editable else null
 	_view.selected = null
-	_view.empty_message = "Select a ChirpEvent whose sheet mode is Timeline or Parameter." if event == null \
-		else "%s has no timeline: set its sheet mode to Timeline or Parameter." % _event_name(event)
-	var kind := "parameter sheet" if event and event.sheet_mode == ChirpEvent.SheetMode.PARAMETER else "timeline"
-	_title.text = "%s (%s)" % [_event_name(event), kind] if editable else "No timeline or parameter sheet event selected"
+	if event == null:
+		_view.empty_message = "Snapshots have no timeline: start it and move the sliders on the right." \
+			if _item_label.begins_with("Snapshot") else "Select an event or snapshot in the Chirp dock or the FileSystem."
+	else:
+		_view.empty_message = "No timeline to edit: play it here, or set its sheet mode to Timeline or Parameter to lay instruments out."
+	var kind := ""
+	if event:
+		kind = ["simultaneous", "consecutive", "timeline", "parameter sheet"][event.sheet_mode]
+	var name := _item_label if not _item_label.is_empty() else _event_name(event)
+	_title.text = ("%s (%s)" % [name, kind] if event else name) if name else "Select an event or snapshot"
 	_add.disabled = not editable
 	var sheet := _view.model.is_sheet()
 	for option in 3:
@@ -136,6 +189,7 @@ func _process(_delta: float) -> void:
 	if not is_visible_in_tree():
 		return
 	var model := _view.model
+	_status.text = _preview.status_text()
 	if _event and _event.sheet_mode != _shown_mode:
 		edit(_event) # the sheet mode was just switched
 	if model.event == null:
@@ -147,8 +201,8 @@ func _process(_delta: float) -> void:
 		model.fit(_view.size.x)
 		_needs_fit = false
 	_view.custom_minimum_size.y = model.content_height()
-	var instance: ChirpEventInstance = _preview_dock._instance
-	if instance and instance.is_playing() and instance.get_event() == model.event:
+	var instance := _preview.instance_of(model.event)
+	if instance:
 		if model.is_sheet():
 			var state := instance._sheet_state()
 			_view.playhead = state.value if state else NAN
@@ -164,9 +218,8 @@ func _sheet_definition() -> ChirpParameter:
 	var local := _event.find_parameter(_event.sheet_parameter)
 	if local:
 		return local
-	var chirp: Node = _preview_dock._chirp
-	if chirp and chirp.config:
-		for definition in chirp.config.global_parameters:
+	if _chirp and _chirp.config:
+		for definition in _chirp.config.global_parameters:
 			if definition and definition.name.nocasecmp_to(_event.sheet_parameter) == 0:
 				return definition
 	return null
@@ -370,20 +423,17 @@ func _changed(resource: Resource) -> void:
 
 func _seek(unit: float) -> void:
 	var model := _view.model
-	var instance: ChirpEventInstance = _preview_dock._instance
-	if not (instance and instance.is_playing() and instance.get_event() == model.event):
-		_preview_dock.make_visible()
-		_preview_dock.play_item(model.event)
-		instance = _preview_dock._instance
-	if instance == null:
-		return
 	if model.is_sheet():
-		# Auditions the crossfade: the event's own parameter, else the global one.
-		if model.event.find_parameter(model.event.sheet_parameter):
-			instance.set_parameter(model.event.sheet_parameter, unit)
-		else:
-			_preview_dock._chirp.parameters.set_value(model.event.sheet_parameter, unit)
-	else:
+		# Auditions the crossfade: sets the sheet parameter (and its slider), then plays if needed,
+		# so a fresh preview starts on the right layers.
+		_preview.set_parameter_value(model.event.sheet_parameter, unit)
+		if _preview.instance_of(model.event) == null:
+			_preview.play()
+		return
+	if _preview.instance_of(model.event) == null:
+		_preview.play()
+	var instance := _preview.instance_of(model.event)
+	if instance:
 		instance.set_timeline_position(model.timeline.to_seconds(unit))
 
 

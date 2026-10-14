@@ -1,4 +1,5 @@
 @tool
+@icon("res://addons/chirp/icons/bus_automation.svg")
 class_name ChirpBusAutomation
 extends Resource
 ## Maps a global parameter onto a bus's volume or one of its effect properties.

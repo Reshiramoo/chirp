@@ -1,4 +1,5 @@
 @tool
+@icon("res://addons/chirp/icons/event.svg")
 class_name ChirpEvent
 extends Resource
 ## An instanceable unit of sound: instruments plus the parameters, automation and

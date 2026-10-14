@@ -1,4 +1,5 @@
 @tool
+@icon("res://addons/chirp/icons/envelope.svg")
 class_name ChirpEnvelope
 extends Resource
 ## AHDSR volume envelope for an event. Release is the fade-out used when the event

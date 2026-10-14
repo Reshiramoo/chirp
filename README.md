@@ -276,8 +276,8 @@ engine.set_parameter("RPM", rpm)   # give RPM a seek_speed to glide smoothly bet
 
 An instrument triggers when the value enters its range and stops when it leaves (or plays on with
 `PLAY_TO_END` / `async_playback`), so one-shot instruments work too, e.g. a different landing
-sound per surface. The **Chirp Timeline** dock edits parameter sheets as well, with the fades drawn
-on each block; clicking its ruler sets the parameter in the preview, so you can hear the crossfades.
+sound per surface. The **Chirp Event** dock edits parameter sheets as well, with the fades drawn
+on each block; clicking its ruler or moving the parameter's slider sets the value while previewing, so you can hear the crossfades.
 
 ## Listeners and roll-off
 
@@ -376,15 +376,14 @@ Area2D "Arena"
 
 ## Editor tools
 
-Enabling the plugin adds three docks and some inspector helpers. Sounds play through a private
+Enabling the plugin adds two docks and some inspector helpers. Sounds play through a private
 preview copy of Chirp, so nothing leaks into your game. Previewing snapshots or bus automation
 changes the project's buses only while something is playing, and puts them back afterwards.
 
 | Tool | Where | What it does |
 |---|---|---|
 | **Chirp** | Right dock | Every event from your sound directories (plain audio files dimmed), plus snapshots, VCAs and global parameters. Filter, select to inspect, double-click to play, drag onto resource slots. **Create Emitter** adds a ChirpEmitter2D/3D for the selected event under the selected node. |
-| **Chirp Preview** | Bottom dock | Play / Stop / Stop Now / Key Off for the selected event or snapshot, sliders for its parameters and the global ones, and a live readout of state, voices, playhead, beats and markers. |
-| **Chirp Timeline** | Bottom dock | A visual editor for TIMELINE events and PARAMETER sheets (instruments along the parameter's range, fades drawn, ruler sets the parameter). For timelines: instruments as blocks, markers as flags (flags that would overlap stack in rows; double-click or F2 renames a marker, and renaming a destination updates the transitions that point to it), regions in stacked rows, a bar/beat grid from the tempo markers, and the preview playhead. Drop audio files or events from the FileSystem or Chirp dock to add instruments where you drop them (onto a sound instrument: added to its playlist; Shift: several files as one playlist). Drag to move, drag edges to resize (snapping to beat or bar, Shift to ignore), right-click to add or delete, Delete key removes, Ctrl/Cmd+wheel zooms, Shift+wheel scrolls, click the ruler to seek. Everything is undoable. |
+| **Chirp Event** | Bottom dock | Edit and audition in one place. The toolbar has Play / Stop / Stop Now / Key Off (Space plays and stops) and a live status (state, voices, playhead or sheet value); the side panel has sliders for the event's and the global parameters and a beat/marker log (toggle it from the toolbar). Snapshots and events without a timeline are auditioned here too. The editor area shows TIMELINE events and PARAMETER sheets (instruments along the parameter's range, fades drawn, ruler sets the parameter). For timelines: instruments as blocks, markers as flags (flags that would overlap stack in rows; double-click or F2 renames a marker, and renaming a destination updates the transitions that point to it), regions in stacked rows, a bar/beat grid from the tempo markers, and the preview playhead. Drop audio files or events from the FileSystem or Chirp dock to add instruments where you drop them (onto a sound instrument: added to its playlist; Shift: several files as one playlist). Drag to move, drag edges to resize (snapping to beat or bar, Shift to ignore), right-click to add or delete, Delete key removes, Ctrl/Cmd+wheel zooms, Shift+wheel scrolls, click the ruler to seek. Everything is undoable. |
 | **Inspector** | | A **Preview** button on events and snapshots; a searchable picker for emitters' `event_path`. |
 | **Gizmos** | 2D / 3D viewports | Max distance circle (2D) or unit size and max distance spheres (3D) on emitters, with drag handles when `override_attenuation` is on; dimmed event values otherwise. |
 

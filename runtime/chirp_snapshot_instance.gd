@@ -1,4 +1,5 @@
 @tool
+@icon("res://addons/chirp/icons/snapshot.svg")
 class_name ChirpSnapshotInstance
 extends RefCounted
 ## One active snapshot. Create with Chirp.mixer.start_snapshot().

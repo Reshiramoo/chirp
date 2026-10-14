@@ -1,3 +1,4 @@
+@icon("res://addons/chirp/icons/parameter_trigger.svg")
 class_name ChirpParameterTrigger
 extends Node
 ## Sets parameters on emitters when a trigger fires, e.g. switch the music to "Cave" when the

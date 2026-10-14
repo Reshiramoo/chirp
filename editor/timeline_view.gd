@@ -19,6 +19,8 @@ signal seek_requested(unit: float)
 signal drop_requested(plan: Dictionary)
 ## Double-click / F2 on a renamable marker; [param rect] is where it's drawn, in view pixels.
 signal rename_requested(marker: ChirpMarker, rect: Rect2)
+## Space: play or stop the preview.
+signal play_toggle_requested
 
 const TimelineModel := preload("timeline_model.gd")
 
@@ -265,6 +267,9 @@ func _draw_drop_preview() -> void:
 
 func _gui_input(input: InputEvent) -> void:
 	if model.event == null:
+		if input is InputEventKey and input.pressed and input.keycode == KEY_SPACE and not input.echo:
+			play_toggle_requested.emit() # snapshots and events without a timeline play too
+			accept_event()
 		return
 	if input is InputEventMouseButton:
 		_on_mouse_button(input)
@@ -279,7 +284,10 @@ func _gui_input(input: InputEvent) -> void:
 		accept_event()
 		queue_redraw()
 	elif input is InputEventKey and input.pressed:
-		if input.keycode == KEY_F2 and selected is ChirpMarker:
+		if input.keycode == KEY_SPACE and not input.echo:
+			play_toggle_requested.emit()
+			accept_event()
+		elif input.keycode == KEY_F2 and selected is ChirpMarker:
 			_request_rename(selected)
 			accept_event()
 		elif input.keycode in [KEY_DELETE, KEY_BACKSPACE] and selected:

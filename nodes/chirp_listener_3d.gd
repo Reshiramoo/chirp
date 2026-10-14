@@ -1,3 +1,4 @@
+@icon("res://addons/chirp/icons/listener_3d.svg")
 class_name ChirpListener3D
 extends Node3D
 ## Where Chirp listens from in 3D: distance roll-off, built-in parameters and FURTHEST stealing

@@ -1,4 +1,5 @@
 @tool
+@icon("res://addons/chirp/icons/marker.svg")
 class_name ChirpMarker
 extends Resource
 ## Something placed on an event's timeline. Positions use the event's timeline_units

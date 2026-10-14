@@ -1,4 +1,5 @@
 @tool
+@icon("res://addons/chirp/icons/bus_override.svg")
 class_name ChirpBusOverride
 extends Resource
 ## One change a snapshot makes to a bus: its volume, one property of one of its

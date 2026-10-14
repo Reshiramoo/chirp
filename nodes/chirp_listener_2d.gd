@@ -1,3 +1,4 @@
+@icon("res://addons/chirp/icons/listener_2d.svg")
 class_name ChirpListener2D
 extends Node2D
 ## Where Chirp listens from in 2D: distance roll-off, built-in parameters and FURTHEST stealing

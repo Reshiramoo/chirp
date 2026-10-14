@@ -1,4 +1,4 @@
-@icon("res://addons/chirp/icons/emitter.svg")
+@icon("res://addons/chirp/icons/emitter_2d.svg")
 class_name ChirpEmitter2D
 extends Node2D
 ## Plays a ChirpEvent at this node's position, following it as it moves.

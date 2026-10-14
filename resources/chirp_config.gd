@@ -1,4 +1,5 @@
 @tool
+@icon("res://addons/chirp/icons/config.svg")
 class_name ChirpConfig
 extends Resource
 ## Global parameters, VCAs, snapshots and bus automation.

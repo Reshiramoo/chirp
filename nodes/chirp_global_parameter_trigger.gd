@@ -1,3 +1,4 @@
+@icon("res://addons/chirp/icons/global_parameter_trigger.svg")
 class_name ChirpGlobalParameterTrigger
 extends Node
 ## Sets global parameters when a trigger fires, e.g. raise "Danger" while the player is inside

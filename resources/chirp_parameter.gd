@@ -1,4 +1,5 @@
 @tool
+@icon("res://addons/chirp/icons/parameter.svg")
 class_name ChirpParameter
 extends Resource
 ## A named value that game code sets at run time to drive an event (local) or the

@@ -4,16 +4,14 @@ extends EditorPlugin
 const AUTOLOAD_NAME := "Chirp"
 const ChirpScript := preload("chirp.gd")
 const EventBrowser := preload("editor/event_browser.gd")
-const PreviewDock := preload("editor/preview_dock.gd")
-const TimelineDock := preload("editor/timeline_dock.gd")
+const EventDock := preload("editor/event_dock.gd")
 const InspectorPlugin := preload("editor/inspector_plugin.gd")
 const AttenuationGizmo3D := preload("editor/attenuation_gizmo_3d.gd")
 const AttenuationOverlay2D := preload("editor/attenuation_overlay_2d.gd")
 
 var _preview_chirp: Node # a private Chirp used to audition sounds in the editor
 var _browser: EventBrowser
-var _preview_dock: PreviewDock
-var _timeline_dock: TimelineDock
+var _event_dock: EventDock
 var _inspector_plugin: InspectorPlugin
 var _gizmo_3d: AttenuationGizmo3D
 var _overlay_2d: AttenuationOverlay2D
@@ -43,13 +41,10 @@ func _enter_tree() -> void:
 	_browser = EventBrowser.new()
 	_browser.setup(self, _preview_chirp)
 	add_dock(_browser)
-	_preview_dock = PreviewDock.new()
-	_preview_dock.setup(_preview_chirp)
-	add_dock(_preview_dock)
-	_timeline_dock = TimelineDock.new()
-	_timeline_dock.setup(self, _preview_dock)
-	add_dock(_timeline_dock)
-	_browser.item_selected.connect(_preview_dock.show_item)
+	_event_dock = EventDock.new()
+	_event_dock.setup(self, _preview_chirp)
+	add_dock(_event_dock)
+	_browser.item_selected.connect(_event_dock.show_item)
 	_browser.item_activated.connect(_play)
 
 	_inspector_plugin = InspectorPlugin.new()
@@ -75,11 +70,9 @@ func _exit_tree() -> void:
 	EditorInterface.get_inspector().property_edited.disconnect(_on_property_edited)
 	remove_node_3d_gizmo_plugin(_gizmo_3d)
 	remove_inspector_plugin(_inspector_plugin)
-	remove_dock(_timeline_dock)
-	remove_dock(_preview_dock)
-	_timeline_dock.queue_free()
+	remove_dock(_event_dock)
+	_event_dock.queue_free()
 	remove_dock(_browser)
-	_preview_dock.queue_free()
 	_browser.queue_free()
 	_preview_chirp.queue_free()
 
@@ -92,9 +85,7 @@ func _edit(object: Object) -> void:
 	_overlay_2d.emitter = object as ChirpEmitter2D
 	update_overlays()
 	if object is ChirpEvent or object is ChirpSnapshot:
-		_preview_dock.show_item(object)
-	if object is ChirpEvent:
-		_timeline_dock.edit(object)
+		_event_dock.show_item(object)
 
 
 func _make_visible(visible: bool) -> void:
@@ -120,8 +111,7 @@ func _on_property_edited(_property: String) -> void:
 
 
 func _play(item: Variant) -> void:
-	_preview_dock.make_visible()
-	_preview_dock.play_item(item)
+	_event_dock.play_item(item)
 
 
 ## Settings and files often change in bursts; reload once per frame at most.

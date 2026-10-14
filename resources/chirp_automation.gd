@@ -1,4 +1,5 @@
 @tool
+@icon("res://addons/chirp/icons/automation.svg")
 class_name ChirpAutomation
 extends Resource
 ## Maps a parameter onto an event property through a curve.

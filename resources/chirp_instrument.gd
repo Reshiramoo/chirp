@@ -1,4 +1,5 @@
 @tool
+@icon("res://addons/chirp/icons/instrument.svg")
 class_name ChirpInstrument
 extends Resource
 ## Something an event plays. One stream = FMOD "single instrument";

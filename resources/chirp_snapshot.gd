@@ -1,4 +1,5 @@
 @tool
+@icon("res://addons/chirp/icons/snapshot.svg")
 class_name ChirpSnapshot
 extends Resource
 ## A saved mixer state that is blended in while active, e.g. "Paused" muffling the
