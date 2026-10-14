@@ -110,7 +110,7 @@ A ChirpEvent is a list of [ChirpInstrument](docs/classes/ChirpInstrument.md)s pl
 | `persistent` | Keep playing after the content ends, until stopped. |
 | `bus` | Bus path; empty = its sound directory's bus. |
 | `parameters` | Local [ChirpParameter](docs/classes/ChirpParameter.md)s: continuous, discrete or labeled, with optional seek speed. Or built-in. |
-| `automations` | [ChirpAutomation](docs/classes/ChirpAutomation.md): parameter → volume or pitch through a `Curve`. |
+| `automations` | [ChirpAutomation](docs/classes/ChirpAutomation.md): parameter → volume or pitch through a `Curve`, or volume/pitch drawn along a timeline. |
 | `modulators` | [ChirpLFO](docs/classes/ChirpLFO.md): sine, triangle, square, saw or random waves on volume or pitch. |
 | `envelope` | [ChirpEnvelope](docs/classes/ChirpEnvelope.md) (AHDSR). `release` is the fade-out used by `stop()`. |
 | `max_instances` / `stealing` / `cooldown` | Voice limits: steal oldest, quietest, furthest, or refuse. |
@@ -250,6 +250,11 @@ music.key_off()                         # release a sustain point
 music.set_timeline_position(12.0)       # seek, in seconds
 ```
 
+**Automation lanes:** volume and pitch can follow the timeline too. In the **Chirp Event** dock,
+**Add → Add Volume Automation** (or Pitch) adds a lane under the instruments: click to add points,
+drag them (snapping to the grid, Shift to ignore), right-click or Delete to remove them. The value
+follows the playhead through loops and jumps; a fade-in over the intro, a pitch dive before a drop.
+
 **Timing:** the playhead moves once per frame, so markers and jumps are accurate to a frame, not a
 sample. For seamless loops, import the music with looping on and make the loop region the same
 length: when the playhead jumps, voices already at the right spot keep playing instead of
@@ -383,7 +388,7 @@ changes the project's buses only while something is playing, and puts them back 
 | Tool | Where | What it does |
 |---|---|---|
 | **Chirp** | Right dock | Every event from your sound directories (plain audio files dimmed), plus snapshots, VCAs and global parameters. Filter, select to inspect, double-click to play, drag onto resource slots. **Create Emitter** adds a ChirpEmitter2D/3D for the selected event under the selected node. |
-| **Chirp Event** | Bottom dock | Edit and audition in one place. The toolbar has Play / Stop / Stop Now / Key Off (Space plays and stops) and a live status (state, voices, playhead or sheet value); the side panel has sliders for the event's and the global parameters and a beat/marker log (toggle it from the toolbar). Snapshots and events without a timeline are auditioned here too. The editor area shows TIMELINE events and PARAMETER sheets (instruments along the parameter's range, fades drawn, ruler sets the parameter). For timelines: instruments as blocks, markers as flags (flags that would overlap stack in rows; double-click or F2 renames a marker, and renaming a destination updates the transitions that point to it), regions in stacked rows, a bar/beat grid from the tempo markers, and the preview playhead. Drop audio files or events from the FileSystem or Chirp dock to add instruments where you drop them (onto a sound instrument: added to its playlist; Shift: several files as one playlist). Drag to move, drag edges to resize (snapping to beat or bar, Shift to ignore), right-click to add or delete, Delete key removes, Ctrl/Cmd+wheel zooms, Shift+wheel scrolls, click the ruler to seek. Everything is undoable. |
+| **Chirp Event** | Bottom dock | Edit and audition in one place. The toolbar has Play / Stop / Stop Now / Key Off (Space plays and stops) and a live status (state, voices, playhead or sheet value); the side panel has sliders for the event's and the global parameters and a beat/marker log (toggle it from the toolbar). Snapshots and events without a timeline are auditioned here too. The editor area shows TIMELINE events and PARAMETER sheets (instruments along the parameter's range, fades drawn, ruler sets the parameter). For timelines: instruments as blocks, markers as flags (flags that would overlap stack in rows; double-click or F2 renames a marker, and renaming a destination updates the transitions that point to it), regions in stacked rows, volume and pitch automation lanes (click to add points, drag, Delete), a bar/beat grid from the tempo markers, and the preview playhead. Drop audio files or events from the FileSystem or Chirp dock to add instruments where you drop them (onto a sound instrument: added to its playlist; Shift: several files as one playlist). Drag to move, drag edges to resize (snapping to beat or bar, Shift to ignore), right-click to add or delete, Delete key removes, Ctrl/Cmd+wheel zooms, Shift+wheel scrolls, click the ruler to seek. Everything is undoable. |
 | **Inspector** | | A **Preview** button on events and snapshots; a searchable picker for emitters' `event_path`. |
 | **Gizmos** | 2D / 3D viewports | Max distance circle (2D) or unit size and max distance spheres (3D) on emitters, with drag handles when `override_attenuation` is on; dimmed event values otherwise. |
 

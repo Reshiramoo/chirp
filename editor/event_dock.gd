@@ -11,9 +11,12 @@ const TimelineModel := preload("timeline_model.gd")
 const PreviewPanel := preload("preview_panel.gd")
 
 const ADD_INSTRUMENT := 100
+const ADD_VOLUME_LANE := 101
+const ADD_PITCH_LANE := 102
 const DELETE := 200
 const INSPECT := 201
 const RENAME := 202
+const DELETE_POINT := 203
 
 var _plugin: EditorPlugin
 var _chirp: Node # the editor's preview copy of Chirp
@@ -121,9 +124,10 @@ func setup(plugin: EditorPlugin, chirp: Node) -> void:
 	_view.drop_requested.connect(_on_drop)
 	_view.rename_requested.connect(_start_rename)
 	_view.play_toggle_requested.connect(_preview.toggle_play)
+	_view.automation_edited.connect(_on_automation_edited)
 
 	var hint := Label.new()
-	hint.text = "Space plays/stops · drop audio files to add (Shift: as one playlist) · double-click or F2 renames a marker · drag to move · drag edges to resize · Shift: no snap · right-click to add · Del deletes · Ctrl/Cmd+wheel zooms · Shift+wheel scrolls · click the ruler to seek"
+	hint.text = "Space plays/stops · click an automation lane to add points · drop audio files to add (Shift: as one playlist) · double-click or F2 renames a marker · drag to move · drag edges to resize · Shift: no snap · right-click to add · Del deletes · Ctrl/Cmd+wheel zooms · Shift+wheel scrolls · click the ruler to seek"
 	hint.add_theme_color_override(&"font_color", EditorInterface.get_editor_theme().get_color(&"disabled_font_color", &"Editor"))
 	hint.clip_text = true
 	box.add_child(hint)
@@ -249,7 +253,9 @@ func _on_context_requested(screen_position: Vector2, hit: Dictionary) -> void:
 		_context.add_icon_item(_icon("Edit"), "Inspect", INSPECT)
 		if _context_resource is ChirpMarker and not TimelineModel.rename_property(_context_resource).is_empty():
 			_context.add_icon_item(_icon("Rename"), "Rename", RENAME)
-		_context.add_icon_item(_icon("Remove"), "Delete", DELETE)
+		if hit.area == "automation" and hit.point >= 0:
+			_context.add_icon_item(_icon("Remove"), "Delete Point", DELETE_POINT)
+		_context.add_icon_item(_icon("Remove"), "Delete Lane" if _context_resource is ChirpAutomation else "Delete", DELETE)
 		_context.add_separator()
 	_fill_add_menu(_context)
 	_context.position = Vector2i(screen_position)
@@ -259,6 +265,9 @@ func _on_context_requested(screen_position: Vector2, hit: Dictionary) -> void:
 
 func _fill_add_menu(menu: PopupMenu) -> void:
 	menu.add_icon_item(_icon("AudioStreamPlayer"), "Add Instrument", ADD_INSTRUMENT)
+	if _view and _view.model.event and not _view.model.is_sheet():
+		menu.add_icon_item(_icon("Curve"), "Add Volume Automation", ADD_VOLUME_LANE)
+		menu.add_icon_item(_icon("Curve"), "Add Pitch Automation", ADD_PITCH_LANE)
 	if _view and _view.model.is_sheet():
 		return # parameter sheets have no markers
 	menu.add_separator("Add Marker")
@@ -276,6 +285,14 @@ func _on_add(id: int, unit: float) -> void:
 			_delete(_context_resource)
 		INSPECT:
 			_on_item_selected(_context_resource)
+		DELETE_POINT:
+			_view.delete_selected_point()
+		ADD_VOLUME_LANE, ADD_PITCH_LANE:
+			var automation := ChirpAutomation.new()
+			automation.source = ChirpAutomation.Source.TIMELINE
+			automation.target = ChirpAutomation.Target.VOLUME if id == ADD_VOLUME_LANE else ChirpAutomation.Target.PITCH
+			automation.points = PackedVector2Array([Vector2(at, 1.0)])
+			_add_to("automations", automation, "Add %s Automation" % ("Volume" if id == ADD_VOLUME_LANE else "Pitch"))
 		RENAME:
 			var index := _event.markers.find(_context_resource)
 			if index >= 0:
@@ -397,12 +414,26 @@ func _add_to(property: String, resource: Resource, action: String) -> void:
 func _delete(resource: Resource) -> void:
 	if _event == null or resource == null:
 		return
-	var property := "instruments" if resource is ChirpInstrument else "markers"
+	var property := "instruments" if resource is ChirpInstrument \
+		else "automations" if resource is ChirpAutomation else "markers"
 	var before: Array = _event.get(property)
 	var after := before.duplicate()
 	after.erase(resource)
-	_commit_array(property, before.duplicate(), after, "Delete %s" % ("Instrument" if resource is ChirpInstrument else "Marker"))
+	var noun := "Instrument" if resource is ChirpInstrument else "Automation Lane" if resource is ChirpAutomation else "Marker"
+	_commit_array(property, before.duplicate(), after, "Delete %s" % noun)
 	_view.selected = null
+	_view.selected_point = {}
+
+
+## One undo action per click or drag on an automation lane.
+func _on_automation_edited(automation: ChirpAutomation, before: PackedVector2Array, after: PackedVector2Array) -> void:
+	var undo_redo := _plugin.get_undo_redo()
+	undo_redo.create_action("Edit Automation")
+	undo_redo.add_do_property(automation, "points", after)
+	undo_redo.add_undo_property(automation, "points", before)
+	undo_redo.add_do_method(self, "_changed", automation)
+	undo_redo.add_undo_method(self, "_changed", automation)
+	undo_redo.commit_action()
 
 
 func _commit_array(property: String, before: Array, after: Array, action: String) -> void:

@@ -7,6 +7,8 @@ extends Control
 ## click the ruler to seek, right-click for the add/delete menu, middle-drag to pan,
 ## Shift+wheel to scroll, Ctrl/Cmd+wheel to zoom. Delete removes the selection.
 ## Double-click a marker (or F2) to rename it. Overlapping marker flags stack in rows.
+## Automation lanes: click to add a point, drag points (Shift: no snapping), right-click for the
+## delete menu, Delete removes the selected point.
 ## Drop audio files or ChirpEvents (from the FileSystem or Chirp dock) to add instruments,
 ## or onto a sound instrument to add to its playlist (Shift: several files as one playlist).
 
@@ -21,6 +23,8 @@ signal drop_requested(plan: Dictionary)
 signal rename_requested(marker: ChirpMarker, rect: Rect2)
 ## Space: play or stop the preview.
 signal play_toggle_requested
+## An automation lane's points were edited (one undo action per click or drag).
+signal automation_edited(automation: ChirpAutomation, before: PackedVector2Array, after: PackedVector2Array)
 
 const TimelineModel := preload("timeline_model.gd")
 
@@ -42,6 +46,10 @@ const MARKER_COLORS := {
 }
 const PLAYHEAD_COLOR := Color(1.0, 0.3, 0.3)
 const DROP_COLOR := Color(0.45, 0.85, 1.0)
+const AUTOMATION_COLORS := {
+	ChirpAutomation.Target.VOLUME: Color(0.98, 0.78, 0.3),
+	ChirpAutomation.Target.PITCH: Color(0.55, 0.9, 0.75),
+}
 
 var model := TimelineModel.new()
 var selected: Resource
@@ -51,6 +59,9 @@ var playhead := NAN
 var empty_message := "Select a ChirpEvent whose sheet mode is Timeline."
 
 var _drag := {} # {resource, part, origin, start_unit}
+var _point_drag := {} # {automation, lane, index, before}: an automation point being placed or dragged
+## The selected automation point: {automation, index}, or empty.
+var selected_point := {}
 var _drop_plan := {} # what the files being dragged over would do, for the preview
 var _panning := false
 
@@ -177,6 +188,8 @@ func _draw() -> void:
 	if not _drop_plan.is_empty():
 		_draw_drop_preview()
 
+	_draw_automation_lanes(font, small, text_color)
+
 	# Playhead
 	if not is_nan(playhead):
 		var x := model.unit_to_x(playhead)
@@ -200,6 +213,11 @@ func _draw() -> void:
 		var instrument := event.instruments[i]
 		var label := "%d  %s" % [i + 1, TimelineModel.instrument_label(instrument) if instrument else "(empty)"]
 		header.call(label, model.instrument_y(i), model.row_height, text_color)
+	var lanes := model.automation_lanes()
+	for lane in lanes.size():
+		var automation: ChirpAutomation = lanes[lane].automation
+		header.call("%s automation" % ChirpAutomation.Target.keys()[automation.target].capitalize(),
+			model.automation_y(lane), model.automation_height, AUTOMATION_COLORS[automation.target].lightened(0.3))
 	if event.instruments.is_empty():
 		_draw_header_text(font, small, "No instruments: right-click to add one",
 			Rect2(8, instruments_top, size.x, model.row_height), text_color.darkened(0.35))
@@ -290,6 +308,9 @@ func _gui_input(input: InputEvent) -> void:
 		elif input.keycode == KEY_F2 and selected is ChirpMarker:
 			_request_rename(selected)
 			accept_event()
+		elif input.keycode in [KEY_DELETE, KEY_BACKSPACE] and not selected_point.is_empty():
+			delete_selected_point()
+			accept_event()
 		elif input.keycode in [KEY_DELETE, KEY_BACKSPACE] and selected:
 			delete_requested.emit(selected)
 			accept_event()
@@ -326,6 +347,8 @@ func _on_mouse_button(button: InputEventMouseButton) -> void:
 					"ruler":
 						var unit: float = hit.unit if button.shift_pressed else model.snap_unit(hit.unit)
 						seek_requested.emit(maxf(unit, model.min_unit()))
+					"automation":
+						_press_automation(hit, button)
 					"instrument", "marker":
 						var resource := model.hit_resource(hit)
 						_select(resource)
@@ -335,6 +358,12 @@ func _on_mouse_button(button: InputEventMouseButton) -> void:
 						_drag = {resource = resource, part = hit.part, origin = model.drag_origin(resource), start_unit = hit.unit}
 					_:
 						_select(null)
+			elif not _point_drag.is_empty():
+				var automation: ChirpAutomation = _point_drag.automation
+				if automation.points != _point_drag.before:
+					automation_edited.emit(automation, _point_drag.before, automation.points)
+				_point_drag = {}
+				queue_redraw()
 			elif not _drag.is_empty():
 				var after := model.drag_origin(_drag.resource)
 				if after != _drag.origin:
@@ -347,6 +376,8 @@ func _on_mouse_button(button: InputEventMouseButton) -> void:
 				var resource := model.hit_resource(hit)
 				if resource:
 					_select(resource)
+				if hit.area == "automation":
+					selected_point = {automation = resource, index = hit.point} if hit.point >= 0 else {}
 				context_requested.emit(get_screen_position() + button.position, hit)
 
 
@@ -354,19 +385,97 @@ func _on_mouse_motion(motion: InputEventMouseMotion) -> void:
 	if _panning:
 		model.scroll = maxf(model.scroll - motion.relative.x / model.zoom, model.min_unit())
 		queue_redraw()
+	elif not _point_drag.is_empty():
+		_drag_point(motion.position, motion.shift_pressed)
 	elif not _drag.is_empty():
 		var delta := model.x_to_unit(motion.position.x) - float(_drag.start_unit)
 		var mode := TimelineModel.Snap.OFF if motion.shift_pressed else model.snap
 		_apply(_drag.resource, model.drag_values(_drag.resource, _drag.part, _drag.origin, delta, mode))
 	else:
 		var hit := model.hit_test(motion.position)
-		if hit.area in ["instrument", "marker"]:
+		if hit.area == "automation":
+			mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if hit.point >= 0 else Control.CURSOR_CROSS
+		elif hit.area in ["instrument", "marker"]:
 			mouse_default_cursor_shape = Control.CURSOR_HSIZE if hit.part != "body" else Control.CURSOR_MOVE
 		else:
 			mouse_default_cursor_shape = Control.CURSOR_ARROW
 
 
+## Click on a lane: grab the point under the mouse, or add one there and grab it.
+func _press_automation(hit: Dictionary, button: InputEventMouseButton) -> void:
+	var automation: ChirpAutomation = model.hit_resource(hit)
+	_select(automation)
+	var before := automation.points.duplicate()
+	var index: int = hit.point
+	if index < 0:
+		var unit: float = hit.unit if button.shift_pressed else model.snap_unit(hit.unit)
+		var added := TimelineModel.automation_insert(automation.points, maxf(unit, model.min_unit()), hit.value)
+		automation.points = added.points
+		index = added.index
+	selected_point = {automation = automation, index = index}
+	_point_drag = {automation = automation, lane = hit.index, index = index, before = before}
+	queue_redraw()
+
+
+func _drag_point(position: Vector2, no_snap: bool) -> void:
+	var automation: ChirpAutomation = _point_drag.automation
+	var unit := model.x_to_unit(position.x)
+	unit = maxf(unit if no_snap else model.snap_unit(unit), model.min_unit())
+	var moved := TimelineModel.automation_move(automation.points, _point_drag.index, unit,
+		model.y_to_value(automation, position.y, _point_drag.lane))
+	automation.points = moved.points
+	_point_drag.index = moved.index
+	selected_point = {automation = automation, index = moved.index}
+	queue_redraw()
+
+
+## Removes the selected automation point (reported through automation_edited for undo).
+func delete_selected_point() -> void:
+	if selected_point.is_empty() or selected_point.index < 0:
+		return
+	var automation: ChirpAutomation = selected_point.automation
+	var before := automation.points.duplicate()
+	var after := automation.points.duplicate()
+	after.remove_at(selected_point.index)
+	selected_point = {}
+	automation_edited.emit(automation, before, after)
+
+
+func _draw_automation_lanes(font: Font, small: int, text_color: Color) -> void:
+	var lanes := model.automation_lanes()
+	var left := model.header_width
+	for lane in lanes.size():
+		var automation: ChirpAutomation = lanes[lane].automation
+		var color: Color = AUTOMATION_COLORS[automation.target]
+		var top := model.automation_y(lane)
+		draw_rect(Rect2(0, top, size.x, model.automation_height), Color(color, 0.05))
+		draw_line(Vector2(0, top), Vector2(size.x, top), Color(1, 1, 1, 0.08))
+		var neutral_y := model.value_to_y(automation, 1.0, lane) # no change
+		draw_dashed_line(Vector2(left, neutral_y), Vector2(size.x, neutral_y), Color(1, 1, 1, 0.12), 1.0, 4.0)
+		# The curve: flat before the first point and after the last
+		var line := PackedVector2Array([Vector2(left, model.value_to_y(automation, automation.value_at(model.x_to_unit(left)), lane))])
+		for point in automation.points:
+			var x := model.unit_to_x(point.x)
+			if x > left and x < size.x:
+				line.append(Vector2(x, model.value_to_y(automation, point.y, lane)))
+		line.append(Vector2(size.x, model.value_to_y(automation, automation.value_at(model.x_to_unit(size.x)), lane)))
+		draw_polyline(line, color, 2.0, true)
+		for i in automation.points.size():
+			var point := automation.points[i]
+			var at := Vector2(model.unit_to_x(point.x), model.value_to_y(automation, point.y, lane))
+			if at.x < left - model.point_radius or at.x > size.x + model.point_radius:
+				continue
+			var is_selected: bool = selected_point.get("automation") == automation and selected_point.get("index") == i
+			draw_circle(at, model.point_radius + (1.5 if is_selected else 0.0), Color.WHITE if is_selected else color)
+			if is_selected:
+				var text := "%s  %s" % [TimelineModel._number(point.x), TimelineModel.automation_text(automation, point.y)]
+				var text_at := Vector2(at.x + 8.0, clampf(at.y - 6.0, top + 12.0, top + model.automation_height - 4.0))
+				draw_string(font, text_at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, small, text_color)
+
+
 func _select(resource: Resource) -> void:
+	if not resource is ChirpAutomation:
+		selected_point = {}
 	selected = resource
 	item_selected.emit(resource)
 	queue_redraw()

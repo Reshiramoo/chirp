@@ -135,7 +135,8 @@ Ignored with a [rolloff](#property-rolloff) other than GODOT.
 <a id="property-automations"></a>
 ### Array[[ChirpAutomation](ChirpAutomation.md)] automations = `[]`
 
-Parameter → volume or pitch mappings. Several automations on the same target multiply.
+Volume and pitch automation: from a parameter through a curve, or along the timeline (TIMELINE
+events). Several automations on the same target multiply.
 
 ---
 

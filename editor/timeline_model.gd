@@ -15,6 +15,8 @@ const BASE_RULER_HEIGHT := 22.0
 const BASE_LANE_HEIGHT := 24.0
 const BASE_ROW_HEIGHT := 30.0
 const BASE_EDGE_GRAB := 6.0
+const BASE_AUTOMATION_HEIGHT := 52.0
+const BASE_POINT_RADIUS := 4.0
 const MIN_ZOOM := 2.0
 const MAX_ZOOM := 2000.0
 const EPSILON := 0.000001
@@ -38,6 +40,8 @@ var ruler_height := BASE_RULER_HEIGHT
 var lane_height := BASE_LANE_HEIGHT
 var row_height := BASE_ROW_HEIGHT
 var edge_grab := BASE_EDGE_GRAB
+var automation_height := BASE_AUTOMATION_HEIGHT
+var point_radius := BASE_POINT_RADIUS
 
 ## Width in pixels of a marker label; the view sets this from its font.
 var measure_text := func(text: String) -> float: return text.length() * 7.0
@@ -55,6 +59,8 @@ func set_display_scale(display_scale: float) -> void:
 	lane_height = BASE_LANE_HEIGHT * display_scale
 	row_height = BASE_ROW_HEIGHT * display_scale
 	edge_grab = BASE_EDGE_GRAB * display_scale
+	automation_height = BASE_AUTOMATION_HEIGHT * display_scale
+	point_radius = BASE_POINT_RADIUS * display_scale
 
 
 ## Recompiles the event's timeline and region stacking (cheap; call whenever the event may have changed).
@@ -214,7 +220,71 @@ func instrument_y(index: int) -> float:
 
 
 func content_height() -> float:
-	return instrument_y(event.instruments.size() if event else 0) + 8.0
+	return automation_y(automation_lanes().size()) + 8.0
+
+
+# --- timeline automation lanes ------------------------------------------------------------
+
+## TIMELINE events: the TIMELINE-source automations, one lane each: [{index, automation}],
+## index being the automation's position in the event's automations.
+func automation_lanes() -> Array[Dictionary]:
+	var lanes: Array[Dictionary] = []
+	if event == null or is_sheet():
+		return lanes
+	for i in event.automations.size():
+		var automation := event.automations[i]
+		if automation and automation.source == ChirpAutomation.Source.TIMELINE:
+			lanes.append({index = i, automation = automation})
+	return lanes
+
+
+## Top of automation lane [param lane], below the instruments.
+func automation_y(lane: int) -> float:
+	return instrument_y(event.instruments.size() if event else 0) + lane * automation_height
+
+
+## Value range a lane shows, from its target.
+static func automation_range(automation: ChirpAutomation) -> Vector2:
+	return ChirpAutomation.TIMELINE_RANGE[automation.target]
+
+
+func value_to_y(automation: ChirpAutomation, value: float, lane: int) -> float:
+	var span := automation_range(automation)
+	var t := clampf((value - span.x) / (span.y - span.x), 0.0, 1.0)
+	var pad := point_radius + 2.0
+	return automation_y(lane) + pad + (1.0 - t) * (automation_height - pad * 2.0)
+
+
+func y_to_value(automation: ChirpAutomation, y: float, lane: int) -> float:
+	var span := automation_range(automation)
+	var pad := point_radius + 2.0
+	var t := 1.0 - (y - automation_y(lane) - pad) / (automation_height - pad * 2.0)
+	return lerpf(span.x, span.y, clampf(t, 0.0, 1.0))
+
+
+## [param points] with a point added at ([param unit], [param value]), kept sorted:
+## {points, index} where index is the new point's.
+static func automation_insert(points: PackedVector2Array, unit: float, value: float) -> Dictionary:
+	var result := points.duplicate()
+	var index := 0
+	while index < result.size() and result[index].x <= unit:
+		index += 1
+	result.insert(index, Vector2(unit, value))
+	return {points = result, index = index}
+
+
+## [param points] with point [param index] moved to ([param unit], [param value]), kept sorted.
+static func automation_move(points: PackedVector2Array, index: int, unit: float, value: float) -> Dictionary:
+	var result := points.duplicate()
+	result.remove_at(index)
+	return automation_insert(result, unit, value)
+
+
+## A display string for a lane value: dB for volume, a multiplier for pitch.
+static func automation_text(automation: ChirpAutomation, value: float) -> String:
+	if automation.target == ChirpAutomation.Target.PITCH:
+		return "×%.2f" % value
+	return "-∞ dB" if value <= 0.00001 else "%.1f dB" % linear_to_db(value)
 
 
 ## Zooms by [param factor], keeping the unit under [param anchor_x] in place.
@@ -412,6 +482,23 @@ func hit_test(point: Vector2) -> Dictionary:
 				hit.part = part
 				return hit
 		return hit
+	var lanes := automation_lanes()
+	if not lanes.is_empty() and point.y >= automation_y(0):
+		var lane := int((point.y - automation_y(0)) / automation_height)
+		if lane < lanes.size():
+			var automation: ChirpAutomation = lanes[lane].automation
+			hit.area = "automation"
+			hit.index = lane
+			hit.point = -1
+			hit.value = y_to_value(automation, point.y, lane)
+			var nearest := INF
+			for i in automation.points.size():
+				var at := Vector2(unit_to_x(automation.points[i].x), value_to_y(automation, automation.points[i].y, lane))
+				var distance := at.distance_to(point)
+				if distance <= point_radius + 4.0 and distance < nearest:
+					nearest = distance
+					hit.point = i
+		return hit
 	var row := int((point.y - instrument_y(0)) / row_height)
 	if row < event.instruments.size() and event.instruments[row]:
 		var span := instrument_span(event.instruments[row])
@@ -441,6 +528,8 @@ func hit_resource(hit: Dictionary) -> Resource:
 		return event.instruments[hit.index]
 	if hit.area == "marker":
 		return event.markers[hit.index]
+	if hit.area == "automation":
+		return automation_lanes()[hit.index].automation
 	return null
 
 

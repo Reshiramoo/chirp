@@ -962,6 +962,10 @@ func _automation(target: ChirpAutomation.Target) -> float:
 	for automation in _event.automations:
 		if automation == null or automation.target != target:
 			continue
+		if automation.source == ChirpAutomation.Source.TIMELINE:
+			if _timeline:
+				factor *= automation.value_at(_timeline.to_units(_playhead))
+			continue
 		var state: ChirpParameter.State
 		if automation.global:
 			state = _chirp.parameters._get_state(automation.parameter)
