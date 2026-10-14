@@ -43,9 +43,13 @@ idle; the plugin auditions sounds through a separate copy with [preview](#proper
 |---|---|
 | void | [apply_config](#method-apply_config)(new_config: [ChirpConfig](ChirpConfig.md)) |
 | [ChirpEventInstance](ChirpEventInstance.md) | [create_instance](#method-create_instance)(event_or_path: Variant) |
+| bool | [is_instrument_muted](#method-is_instrument_muted)(instrument: [ChirpInstrument](ChirpInstrument.md)) |
+| bool | [is_instrument_soloed](#method-is_instrument_soloed)(instrument: [ChirpInstrument](ChirpInstrument.md)) |
 | [ChirpEventInstance](ChirpEventInstance.md) | [play_one_shot](#method-play_one_shot)(event_or_path: Variant, position: Variant = null) |
 | [ChirpEventInstance](ChirpEventInstance.md) | [play_one_shot_attached](#method-play_one_shot_attached)(event_or_path: Variant, node: Node) |
 | void | [reload_settings](#method-reload_settings)() |
+| void | [set_instrument_muted](#method-set_instrument_muted)(instrument: [ChirpInstrument](ChirpInstrument.md), muted: bool) |
+| void | [set_instrument_soloed](#method-set_instrument_soloed)(instrument: [ChirpInstrument](ChirpInstrument.md), soloed: bool) |
 
 ## Constants
 
@@ -112,6 +116,20 @@ Shortcut for [Chirp.events.create_instance()](ChirpEvents.md#method-create_insta
 
 ---
 
+<a id="method-is_instrument_muted"></a>
+### bool is_instrument_muted(instrument: [ChirpInstrument](ChirpInstrument.md))
+
+`true` while [set_instrument_muted()](#method-set_instrument_muted) mutes it.
+
+---
+
+<a id="method-is_instrument_soloed"></a>
+### bool is_instrument_soloed(instrument: [ChirpInstrument](ChirpInstrument.md))
+
+`true` while [set_instrument_soloed()](#method-set_instrument_soloed) solos it.
+
+---
+
 <a id="method-play_one_shot"></a>
 ### [ChirpEventInstance](ChirpEventInstance.md) play_one_shot(event_or_path: Variant, position: Variant = null)
 
@@ -133,3 +151,21 @@ Loads the `chirp/config` resource (as with [apply_config()](#method-apply_config
 `chirp/sound_directories` (as with [ChirpEvents.scan()](ChirpEvents.md#method-scan)).
 Called automatically when Chirp starts. Call it yourself after changing those project settings
 at run time.
+
+---
+
+<a id="method-set_instrument_muted"></a>
+### void set_instrument_muted(instrument: [ChirpInstrument](ChirpInstrument.md), muted: bool)
+
+Auditioning: silences `instrument` in every event that plays it while `muted`. The **M** buttons in
+the Chirp Event dock use this on the editor's preview Chirp; it isn't saved and doesn't affect the
+game. Usable at run time too, e.g. for debugging a mix.
+
+---
+
+<a id="method-set_instrument_soloed"></a>
+### void set_instrument_soloed(instrument: [ChirpInstrument](ChirpInstrument.md), soloed: bool)
+
+Auditioning: while any instrument of an event is soloed, that event's other instruments are silent
+(other events are unaffected). The **S** buttons in the Chirp Event dock use this on the editor's
+preview Chirp.

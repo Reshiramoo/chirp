@@ -659,10 +659,10 @@ func _trigger(instrument: ChirpInstrument, offset := 0.0) -> Voice:
 	voice.instrument = instrument
 	if instrument.kind == ChirpInstrument.Kind.SCATTERER:
 		# Randomized per scattered sound instead (see _spawn).
-		voice.gain = db_to_linear(instrument.volume_db)
+		voice.gain = 1.0
 		voice.pitch = pow(2.0, instrument.pitch_semitones / 12.0)
 	else:
-		voice.gain = db_to_linear(instrument.volume_db - randf() * instrument.random_volume_db)
+		voice.gain = db_to_linear(-randf() * instrument.random_volume_db)
 		var detune := randf_range(-instrument.random_pitch_semitones, instrument.random_pitch_semitones)
 		voice.pitch = pow(2.0, (instrument.pitch_semitones + detune) / 12.0)
 	match instrument.kind:
@@ -910,7 +910,9 @@ func _clear_voices() -> void:
 
 
 func _apply(voice: Voice, volume_factor: float, pitch_factor: float) -> void:
-	var gain := _get_level() * voice.gain * volume_factor
+	# The instrument's volume is read live, so the editor's volume knob is heard while playing.
+	var gain: float = _get_level() * voice.gain * db_to_linear(voice.instrument.volume_db) * volume_factor \
+		* _chirp._audition_gain(_event, voice.instrument)
 	if _event.sheet_mode == ChirpEvent.SheetMode.PARAMETER:
 		if voice.entry >= 0:
 			voice.fade = _sheet_fade(voice.instrument)

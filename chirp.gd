@@ -33,6 +33,8 @@ var preview := false
 
 var _voice_root: Node
 var _warned := {}
+var _muted := {} # ChirpInstrument -> true (auditioning)
+var _soloed := {} # ChirpInstrument -> true (auditioning)
 
 
 func _init() -> void:
@@ -108,6 +110,43 @@ func play_one_shot(event_or_path: Variant, position: Variant = null) -> ChirpEve
 ## Shortcut for [code]Chirp.events.play_one_shot_attached()[/code].
 func play_one_shot_attached(event_or_path: Variant, node: Node) -> ChirpEventInstance:
 	return events.play_one_shot_attached(event_or_path, node)
+
+
+## Auditioning (used by the editor's preview): silences [param instrument] while [param muted].
+func set_instrument_muted(instrument: ChirpInstrument, muted: bool) -> void:
+	if muted:
+		_muted[instrument] = true
+	else:
+		_muted.erase(instrument)
+
+
+func is_instrument_muted(instrument: ChirpInstrument) -> bool:
+	return _muted.has(instrument)
+
+
+## Auditioning: while any instrument of an event is soloed, that event's other instruments are silent.
+func set_instrument_soloed(instrument: ChirpInstrument, soloed: bool) -> void:
+	if soloed:
+		_soloed[instrument] = true
+	else:
+		_soloed.erase(instrument)
+
+
+func is_instrument_soloed(instrument: ChirpInstrument) -> bool:
+	return _soloed.has(instrument)
+
+
+## Gain from mute and solo for [param instrument] of [param event]: 0 or 1.
+func _audition_gain(event: ChirpEvent, instrument: ChirpInstrument) -> float:
+	if _muted.is_empty() and _soloed.is_empty():
+		return 1.0
+	if _muted.has(instrument):
+		return 0.0
+	if not _soloed.is_empty() and not _soloed.has(instrument):
+		for other in event.instruments:
+			if _soloed.has(other):
+				return 0.0 # another instrument of this event is soloed
+	return 1.0
 
 
 func _warn_once(key: String, message: String) -> void:

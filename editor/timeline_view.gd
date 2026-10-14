@@ -7,8 +7,10 @@ extends Control
 ## click the ruler to seek, right-click for the add/delete menu, middle-drag to pan,
 ## Shift+wheel to scroll, Ctrl/Cmd+wheel to zoom. Delete removes the selection.
 ## Double-click a marker (or F2) to rename it. Overlapping marker flags stack in rows.
-## Automation lanes: click to add a point, drag points (Shift: no snapping), right-click for the
-## delete menu, Delete removes the selected point.
+## Automation lanes: click to add a point, drag points (Shift: no snapping), right-click or Delete
+## removes a point; right-click on the lane for its menu.
+## Instrument headers: M mutes and S solos it in the editor preview; drag the knob up/down for its
+## volume (Shift: finer), double-click the knob to reset it to 0 dB.
 ## Drop audio files or ChirpEvents (from the FileSystem or Chirp dock) to add instruments,
 ## or onto a sound instrument to add to its playlist (Shift: several files as one playlist).
 
@@ -23,8 +25,14 @@ signal drop_requested(plan: Dictionary)
 signal rename_requested(marker: ChirpMarker, rect: Rect2)
 ## Space: play or stop the preview.
 signal play_toggle_requested
-## An automation lane's points were edited (one undo action per click or drag).
-signal automation_edited(automation: ChirpAutomation, before: PackedVector2Array, after: PackedVector2Array)
+## An automation lane was edited (one undo action per click, drag or delete): set [param property]
+## of [param object] (the automation's points, or its curve's data) from before to after.
+signal automation_edited(object: Object, property: String, before: Variant, after: Variant)
+## The volume knob of an instrument was turned (one undo action per drag or reset).
+signal instrument_volume_changed(instrument: ChirpInstrument, before_db: float, after_db: float)
+
+const KNOB_MIN_DB := -40.0
+const KNOB_MAX_DB := 12.0
 
 const TimelineModel := preload("timeline_model.gd")
 
@@ -62,6 +70,9 @@ var _drag := {} # {resource, part, origin, start_unit}
 var _point_drag := {} # {automation, lane, index, before}: an automation point being placed or dragged
 ## The selected automation point: {automation, index}, or empty.
 var selected_point := {}
+## Something with Chirp's audition API (the editor's preview Chirp) for the M / S buttons. Optional.
+var audition: Object
+var _knob_drag := {} # {instrument, before, start_y, start_db}
 var _drop_plan := {} # what the files being dragged over would do, for the preview
 var _panning := false
 
@@ -212,7 +223,14 @@ func _draw() -> void:
 	for i in event.instruments.size():
 		var instrument := event.instruments[i]
 		var label := "%d  %s" % [i + 1, TimelineModel.instrument_label(instrument) if instrument else "(empty)"]
-		header.call(label, model.instrument_y(i), model.row_height, text_color)
+		if instrument == null:
+			header.call(label, model.instrument_y(i), model.row_height, text_color)
+			continue
+		var label_width: float = model.header_controls(i).mute.position.x - 12.0
+		var muted: bool = audition != null and audition.is_instrument_muted(instrument)
+		_draw_header_text(font, small, label, Rect2(8, model.instrument_y(i), label_width, model.row_height),
+			text_color.darkened(0.45) if muted else text_color)
+		_draw_header_controls(i, instrument, font, small, text_color)
 	var lanes := model.automation_lanes()
 	for lane in lanes.size():
 		var automation: ChirpAutomation = lanes[lane].automation
@@ -349,6 +367,8 @@ func _on_mouse_button(button: InputEventMouseButton) -> void:
 						seek_requested.emit(maxf(unit, model.min_unit()))
 					"automation":
 						_press_automation(hit, button)
+					"header":
+						_press_header(hit, button)
 					"instrument", "marker":
 						var resource := model.hit_resource(hit)
 						_select(resource)
@@ -359,10 +379,17 @@ func _on_mouse_button(button: InputEventMouseButton) -> void:
 					_:
 						_select(null)
 			elif not _point_drag.is_empty():
-				var automation: ChirpAutomation = _point_drag.automation
-				if automation.points != _point_drag.before:
-					automation_edited.emit(automation, _point_drag.before, automation.points)
+				var before: Dictionary = _point_drag.before
+				var after := model.lane_state(_point_drag.automation)
+				if after.value != before.value:
+					automation_edited.emit(before.object, before.property, before.value, after.value)
 				_point_drag = {}
+				queue_redraw()
+			elif not _knob_drag.is_empty():
+				var instrument: ChirpInstrument = _knob_drag.instrument
+				if instrument.volume_db != _knob_drag.before:
+					instrument_volume_changed.emit(instrument, _knob_drag.before, instrument.volume_db)
+				_knob_drag = {}
 				queue_redraw()
 			elif not _drag.is_empty():
 				var after := model.drag_origin(_drag.resource)
@@ -376,8 +403,11 @@ func _on_mouse_button(button: InputEventMouseButton) -> void:
 				var resource := model.hit_resource(hit)
 				if resource:
 					_select(resource)
-				if hit.area == "automation":
-					selected_point = {automation = resource, index = hit.point} if hit.point >= 0 else {}
+				if hit.area == "automation" and hit.point >= 0:
+					selected_point = {automation = resource, index = hit.point}
+					delete_selected_point() # right-click on a point deletes it
+					return
+				selected_point = {}
 				context_requested.emit(get_screen_position() + button.position, hit)
 
 
@@ -387,6 +417,11 @@ func _on_mouse_motion(motion: InputEventMouseMotion) -> void:
 		queue_redraw()
 	elif not _point_drag.is_empty():
 		_drag_point(motion.position, motion.shift_pressed)
+	elif not _knob_drag.is_empty():
+		var per_pixel := 0.05 if motion.shift_pressed else 0.25
+		var db: float = _knob_drag.start_db + (_knob_drag.start_y - motion.position.y) * per_pixel
+		_knob_drag.instrument.volume_db = snappedf(clampf(db, -80.0, 24.0), 0.1)
+		queue_redraw()
 	elif not _drag.is_empty():
 		var delta := model.x_to_unit(motion.position.x) - float(_drag.start_unit)
 		var mode := TimelineModel.Snap.OFF if motion.shift_pressed else model.snap
@@ -395,6 +430,9 @@ func _on_mouse_motion(motion: InputEventMouseMotion) -> void:
 		var hit := model.hit_test(motion.position)
 		if hit.area == "automation":
 			mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if hit.point >= 0 else Control.CURSOR_CROSS
+		elif hit.area == "header":
+			mouse_default_cursor_shape = Control.CURSOR_VSIZE if hit.part == "knob" \
+				else Control.CURSOR_POINTING_HAND if hit.part in ["mute", "solo"] else Control.CURSOR_ARROW
 		elif hit.area in ["instrument", "marker"]:
 			mouse_default_cursor_shape = Control.CURSOR_HSIZE if hit.part != "body" else Control.CURSOR_MOVE
 		else:
@@ -405,13 +443,11 @@ func _on_mouse_motion(motion: InputEventMouseMotion) -> void:
 func _press_automation(hit: Dictionary, button: InputEventMouseButton) -> void:
 	var automation: ChirpAutomation = model.hit_resource(hit)
 	_select(automation)
-	var before := automation.points.duplicate()
+	var before := model.lane_state(automation)
 	var index: int = hit.point
 	if index < 0:
 		var unit: float = hit.unit if button.shift_pressed else model.snap_unit(hit.unit)
-		var added := TimelineModel.automation_insert(automation.points, maxf(unit, model.min_unit()), hit.value)
-		automation.points = added.points
-		index = added.index
+		index = model.lane_insert(automation, maxf(unit, model.min_unit()), hit.value)
 	selected_point = {automation = automation, index = index}
 	_point_drag = {automation = automation, lane = hit.index, index = index, before = before}
 	queue_redraw()
@@ -421,11 +457,9 @@ func _drag_point(position: Vector2, no_snap: bool) -> void:
 	var automation: ChirpAutomation = _point_drag.automation
 	var unit := model.x_to_unit(position.x)
 	unit = maxf(unit if no_snap else model.snap_unit(unit), model.min_unit())
-	var moved := TimelineModel.automation_move(automation.points, _point_drag.index, unit,
+	_point_drag.index = model.lane_move(automation, _point_drag.index, unit,
 		model.y_to_value(automation, position.y, _point_drag.lane))
-	automation.points = moved.points
-	_point_drag.index = moved.index
-	selected_point = {automation = automation, index = moved.index}
+	selected_point = {automation = automation, index = _point_drag.index}
 	queue_redraw()
 
 
@@ -434,11 +468,63 @@ func delete_selected_point() -> void:
 	if selected_point.is_empty() or selected_point.index < 0:
 		return
 	var automation: ChirpAutomation = selected_point.automation
-	var before := automation.points.duplicate()
-	var after := automation.points.duplicate()
-	after.remove_at(selected_point.index)
+	var before := model.lane_state(automation)
+	model.lane_remove(automation, selected_point.index)
 	selected_point = {}
-	automation_edited.emit(automation, before, after)
+	automation_edited.emit(before.object, before.property, before.value, model.lane_state(automation).value)
+	queue_redraw()
+
+
+## Click in an instrument's header: mute, solo, or grab the volume knob (double-click resets it).
+func _press_header(hit: Dictionary, button: InputEventMouseButton) -> void:
+	var instrument: ChirpInstrument = model.event.instruments[hit.index]
+	match hit.part:
+		"mute":
+			if audition:
+				audition.set_instrument_muted(instrument, not audition.is_instrument_muted(instrument))
+		"solo":
+			if audition:
+				audition.set_instrument_soloed(instrument, not audition.is_instrument_soloed(instrument))
+		"knob":
+			if button.double_click:
+				if instrument.volume_db != 0.0:
+					instrument_volume_changed.emit(instrument, instrument.volume_db, 0.0)
+					instrument.volume_db = 0.0
+			else:
+				_knob_drag = {instrument = instrument, before = instrument.volume_db,
+					start_y = button.position.y, start_db = instrument.volume_db}
+		_:
+			_select(instrument)
+	queue_redraw()
+
+
+func _draw_header_controls(row: int, instrument: ChirpInstrument, font: Font, small: int, text_color: Color) -> void:
+	var controls := model.header_controls(row)
+	var muted: bool = audition != null and audition.is_instrument_muted(instrument)
+	var soloed: bool = audition != null and audition.is_instrument_soloed(instrument)
+	for part in [["mute", "M", muted, Color(0.95, 0.45, 0.35)], ["solo", "S", soloed, Color(0.98, 0.82, 0.3)]]:
+		var rect: Rect2 = controls[part[0]]
+		var on: bool = part[2]
+		draw_rect(rect, part[3] if on else Color(1, 1, 1, 0.08))
+		draw_rect(rect, Color(1, 1, 1, 0.25), false, 1.0)
+		var letter_size := font.get_string_size(part[1], HORIZONTAL_ALIGNMENT_LEFT, -1, small)
+		draw_string(font, rect.get_center() + Vector2(-letter_size.x / 2.0, letter_size.y * 0.3), part[1],
+			HORIZONTAL_ALIGNMENT_LEFT, -1, small, Color(0.08, 0.08, 0.1) if on else text_color.darkened(0.2))
+	# Volume knob: an arc from KNOB_MIN_DB to KNOB_MAX_DB, a pointer, 0 dB at the top
+	var knob: Rect2 = controls.knob
+	var center := knob.get_center()
+	var radius := knob.size.x / 2.0
+	var t := clampf((instrument.volume_db - KNOB_MIN_DB) / (KNOB_MAX_DB - KNOB_MIN_DB), 0.0, 1.0)
+	var start_angle := deg_to_rad(135.0)
+	var sweep := deg_to_rad(270.0)
+	draw_circle(center, radius - 1.0, Color(1, 1, 1, 0.1))
+	draw_arc(center, radius - 1.0, start_angle, start_angle + sweep, 24, Color(1, 1, 1, 0.2), 1.5, true)
+	draw_arc(center, radius - 1.0, start_angle, start_angle + sweep * t, 24, Color(0.45, 0.72, 1.0), 2.0, true)
+	var angle := start_angle + sweep * t
+	draw_line(center, center + Vector2.from_angle(angle) * (radius - 2.0), text_color, 1.5, true)
+	if not _knob_drag.is_empty() and _knob_drag.instrument == instrument:
+		var text := "%+.1f dB" % instrument.volume_db
+		draw_string(font, Vector2(knob.end.x + 4.0, center.y + 4.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, small, text_color)
 
 
 func _draw_automation_lanes(font: Font, small: int, text_color: Color) -> void:
@@ -452,16 +538,29 @@ func _draw_automation_lanes(font: Font, small: int, text_color: Color) -> void:
 		draw_line(Vector2(0, top), Vector2(size.x, top), Color(1, 1, 1, 0.08))
 		var neutral_y := model.value_to_y(automation, 1.0, lane) # no change
 		draw_dashed_line(Vector2(left, neutral_y), Vector2(size.x, neutral_y), Color(1, 1, 1, 0.12), 1.0, 4.0)
-		# The curve: flat before the first point and after the last
-		var line := PackedVector2Array([Vector2(left, model.value_to_y(automation, automation.value_at(model.x_to_unit(left)), lane))])
-		for point in automation.points:
-			var x := model.unit_to_x(point.x)
-			if x > left and x < size.x:
-				line.append(Vector2(x, model.value_to_y(automation, point.y, lane)))
-		line.append(Vector2(size.x, model.value_to_y(automation, automation.value_at(model.x_to_unit(size.x)), lane)))
-		draw_polyline(line, color, 2.0, true)
-		for i in automation.points.size():
-			var point := automation.points[i]
+		var points := model.lane_points(automation)
+		var line := PackedVector2Array()
+		if automation.source == ChirpAutomation.Source.TIMELINE:
+			# Straight between points, flat before the first and after the last
+			line.append(Vector2(left, model.value_to_y(automation, model.lane_value_at(automation, model.x_to_unit(left)), lane)))
+			for point in points:
+				var x := model.unit_to_x(point.x)
+				if x > left and x < size.x:
+					line.append(Vector2(x, model.value_to_y(automation, point.y, lane)))
+			line.append(Vector2(size.x, model.value_to_y(automation, model.lane_value_at(automation, model.x_to_unit(size.x)), lane)))
+		else:
+			# A curve: sampled, so tangents made in the inspector show
+			var sheet := model.sheet_range()
+			var x0 := maxf(left, model.unit_to_x(sheet.x))
+			var x1 := minf(size.x, model.unit_to_x(sheet.y))
+			var x := x0
+			while x <= x1:
+				line.append(Vector2(x, model.value_to_y(automation, model.lane_value_at(automation, model.x_to_unit(x)), lane)))
+				x += 3.0
+		if line.size() >= 2:
+			draw_polyline(line, color, 2.0, true)
+		for i in points.size():
+			var point := points[i]
 			var at := Vector2(model.unit_to_x(point.x), model.value_to_y(automation, point.y, lane))
 			if at.x < left - model.point_radius or at.x > size.x + model.point_radius:
 				continue

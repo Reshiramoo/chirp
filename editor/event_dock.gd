@@ -125,6 +125,8 @@ func setup(plugin: EditorPlugin, chirp: Node) -> void:
 	_view.rename_requested.connect(_start_rename)
 	_view.play_toggle_requested.connect(_preview.toggle_play)
 	_view.automation_edited.connect(_on_automation_edited)
+	_view.instrument_volume_changed.connect(_on_instrument_volume_changed)
+	_view.audition = chirp
 
 	var hint := Label.new()
 	hint.text = "Space plays/stops · click an automation lane to add points · drop audio files to add (Shift: as one playlist) · double-click or F2 renames a marker · drag to move · drag edges to resize · Shift: no snap · right-click to add · Del deletes · Ctrl/Cmd+wheel zooms · Shift+wheel scrolls · click the ruler to seek"
@@ -265,7 +267,7 @@ func _on_context_requested(screen_position: Vector2, hit: Dictionary) -> void:
 
 func _fill_add_menu(menu: PopupMenu) -> void:
 	menu.add_icon_item(_icon("AudioStreamPlayer"), "Add Instrument", ADD_INSTRUMENT)
-	if _view and _view.model.event and not _view.model.is_sheet():
+	if _view and _view.model.event:
 		menu.add_icon_item(_icon("Curve"), "Add Volume Automation", ADD_VOLUME_LANE)
 		menu.add_icon_item(_icon("Curve"), "Add Pitch Automation", ADD_PITCH_LANE)
 	if _view and _view.model.is_sheet():
@@ -289,9 +291,19 @@ func _on_add(id: int, unit: float) -> void:
 			_view.delete_selected_point()
 		ADD_VOLUME_LANE, ADD_PITCH_LANE:
 			var automation := ChirpAutomation.new()
-			automation.source = ChirpAutomation.Source.TIMELINE
 			automation.target = ChirpAutomation.Target.VOLUME if id == ADD_VOLUME_LANE else ChirpAutomation.Target.PITCH
-			automation.points = PackedVector2Array([Vector2(at, 1.0)])
+			if model.is_sheet():
+				# A curve along the sheet parameter, with room above 1 for pitch.
+				automation.parameter = _event.sheet_parameter
+				automation.global = _event.find_parameter(_event.sheet_parameter) == null
+				var span: Vector2 = ChirpAutomation.TIMELINE_RANGE[automation.target]
+				automation.curve = Curve.new()
+				automation.curve.min_value = span.x
+				automation.curve.max_value = span.y
+				model.lane_insert(automation, at, 1.0)
+			else:
+				automation.source = ChirpAutomation.Source.TIMELINE
+				automation.points = PackedVector2Array([Vector2(at, 1.0)])
 			_add_to("automations", automation, "Add %s Automation" % ("Volume" if id == ADD_VOLUME_LANE else "Pitch"))
 		RENAME:
 			var index := _event.markers.find(_context_resource)
@@ -425,14 +437,24 @@ func _delete(resource: Resource) -> void:
 	_view.selected_point = {}
 
 
-## One undo action per click or drag on an automation lane.
-func _on_automation_edited(automation: ChirpAutomation, before: PackedVector2Array, after: PackedVector2Array) -> void:
+## One undo action per click, drag or delete on an automation lane.
+func _on_automation_edited(object: Object, property: String, before: Variant, after: Variant) -> void:
 	var undo_redo := _plugin.get_undo_redo()
 	undo_redo.create_action("Edit Automation")
-	undo_redo.add_do_property(automation, "points", after)
-	undo_redo.add_undo_property(automation, "points", before)
-	undo_redo.add_do_method(self, "_changed", automation)
-	undo_redo.add_undo_method(self, "_changed", automation)
+	undo_redo.add_do_property(object, property, after)
+	undo_redo.add_undo_property(object, property, before)
+	undo_redo.add_do_method(self, "_changed", object)
+	undo_redo.add_undo_method(self, "_changed", object)
+	undo_redo.commit_action()
+
+
+func _on_instrument_volume_changed(instrument: ChirpInstrument, before_db: float, after_db: float) -> void:
+	var undo_redo := _plugin.get_undo_redo()
+	undo_redo.create_action("Change Instrument Volume")
+	undo_redo.add_do_property(instrument, "volume_db", after_db)
+	undo_redo.add_undo_property(instrument, "volume_db", before_db)
+	undo_redo.add_do_method(self, "_changed", instrument)
+	undo_redo.add_undo_method(self, "_changed", instrument)
 	undo_redo.commit_action()
 
 

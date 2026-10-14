@@ -21,6 +21,10 @@ marker. Loops and jumps carry the value with the playhead. Draw them in the **Ch
 **Add → Add Volume Automation** adds a lane under the instruments; click to add points, drag them,
 right-click or Delete to remove them. On events without a timeline, TIMELINE automations do nothing.
 
+On a PARAMETER sheet, automations on the sheet parameter appear as lanes in the dock too, along the
+parameter's axis. They edit [curve](#property-curve) point by point, so tangents shaped in the
+inspector are kept, and their value range is the curve's `min_value` / `max_value`.
+
 Example: a sound that fades out with distance, using a `DISTANCE_NORMALIZED` built-in parameter
 named `"Distance"` and a curve going from 1 down to 0:
 

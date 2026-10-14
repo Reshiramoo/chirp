@@ -339,7 +339,9 @@ SOUND: the stream, or the playlist of streams. SCATTERER: the sounds it picks fr
 <a id="property-volume_db"></a>
 ### float volume_db = `0.0`
 
-Volume offset in dB.
+Volume offset in dB. Read every frame, so changing it (e.g. with the volume knob in the Chirp Event
+dock) is heard while the instrument plays. [random_volume_db](#property-random_volume_db) is drawn
+once per trigger on top of it.
 
 ## Method Descriptions
 

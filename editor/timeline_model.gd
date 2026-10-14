@@ -225,15 +225,22 @@ func content_height() -> float:
 
 # --- timeline automation lanes ------------------------------------------------------------
 
-## TIMELINE events: the TIMELINE-source automations, one lane each: [{index, automation}],
-## index being the automation's position in the event's automations.
+## Automation lanes: [{index, automation}], index being the automation's position in the event.
+## TIMELINE events: the TIMELINE-source automations. PARAMETER sheets: the PARAMETER-source
+## automations of the sheet parameter that have a curve (their X axis is the sheet's).
 func automation_lanes() -> Array[Dictionary]:
 	var lanes: Array[Dictionary] = []
-	if event == null or is_sheet():
+	if event == null:
 		return lanes
 	for i in event.automations.size():
 		var automation := event.automations[i]
-		if automation and automation.source == ChirpAutomation.Source.TIMELINE:
+		if automation == null:
+			continue
+		if is_sheet():
+			if automation.source == ChirpAutomation.Source.PARAMETER and automation.curve \
+					and automation.parameter.nocasecmp_to(event.sheet_parameter) == 0:
+				lanes.append({index = i, automation = automation})
+		elif automation.source == ChirpAutomation.Source.TIMELINE:
 			lanes.append({index = i, automation = automation})
 	return lanes
 
@@ -243,8 +250,10 @@ func automation_y(lane: int) -> float:
 	return instrument_y(event.instruments.size() if event else 0) + lane * automation_height
 
 
-## Value range a lane shows, from its target.
-static func automation_range(automation: ChirpAutomation) -> Vector2:
+## Value range a lane shows: its curve's on parameter sheets, else from its target.
+func automation_range(automation: ChirpAutomation) -> Vector2:
+	if automation.source == ChirpAutomation.Source.PARAMETER and automation.curve:
+		return Vector2(automation.curve.min_value, maxf(automation.curve.max_value, automation.curve.min_value + EPSILON))
 	return ChirpAutomation.TIMELINE_RANGE[automation.target]
 
 
@@ -260,6 +269,72 @@ func y_to_value(automation: ChirpAutomation, y: float, lane: int) -> float:
 	var pad := point_radius + 2.0
 	var t := 1.0 - (y - automation_y(lane) - pad) / (automation_height - pad * 2.0)
 	return lerpf(span.x, span.y, clampf(t, 0.0, 1.0))
+
+
+## A lane's points in axis units (timeline units, or sheet parameter values) and values.
+func lane_points(automation: ChirpAutomation) -> PackedVector2Array:
+	if automation.source == ChirpAutomation.Source.TIMELINE:
+		return automation.points
+	var points := PackedVector2Array()
+	for i in automation.curve.point_count:
+		var point := automation.curve.get_point_position(i)
+		points.append(Vector2(_from_domain(automation.curve, point.x), point.y))
+	return points
+
+
+## A lane's value at [param unit] (curves are sampled, so their tangents show).
+func lane_value_at(automation: ChirpAutomation, unit: float) -> float:
+	if automation.source == ChirpAutomation.Source.TIMELINE:
+		return automation.value_at(unit)
+	return automation.curve.sample(_to_domain(automation.curve, unit))
+
+
+## Adds a point to a lane; returns its index.
+func lane_insert(automation: ChirpAutomation, unit: float, value: float) -> int:
+	if automation.source == ChirpAutomation.Source.TIMELINE:
+		var added := automation_insert(automation.points, unit, value)
+		automation.points = added.points
+		return added.index
+	return automation.curve.add_point(Vector2(_to_domain(automation.curve, unit), value), 0.0, 0.0,
+		Curve.TANGENT_LINEAR, Curve.TANGENT_LINEAR)
+
+
+## Moves a lane's point (keeping a curve point's tangents); returns its new index.
+func lane_move(automation: ChirpAutomation, index: int, unit: float, value: float) -> int:
+	if automation.source == ChirpAutomation.Source.TIMELINE:
+		var moved := automation_move(automation.points, index, unit, value)
+		automation.points = moved.points
+		return moved.index
+	automation.curve.set_point_value(index, value)
+	return automation.curve.set_point_offset(index, _to_domain(automation.curve, unit))
+
+
+func lane_remove(automation: ChirpAutomation, index: int) -> void:
+	if automation.source == ChirpAutomation.Source.TIMELINE:
+		var points := automation.points.duplicate()
+		points.remove_at(index)
+		automation.points = points
+	else:
+		automation.curve.remove_point(index)
+
+
+## What undo needs to restore a lane: {object, property, value}.
+func lane_state(automation: ChirpAutomation) -> Dictionary:
+	if automation.source == ChirpAutomation.Source.TIMELINE:
+		return {object = automation, property = "points", value = automation.points.duplicate()}
+	return {object = automation.curve, property = "_data", value = automation.curve.get("_data").duplicate()}
+
+
+func _to_domain(curve: Curve, unit: float) -> float:
+	var axis := sheet_range()
+	var t := clampf((unit - axis.x) / (axis.y - axis.x), 0.0, 1.0)
+	return lerpf(curve.min_domain, curve.max_domain, t)
+
+
+func _from_domain(curve: Curve, x: float) -> float:
+	var span := curve.max_domain - curve.min_domain
+	var t := 0.0 if span <= 0.0 else (x - curve.min_domain) / span
+	return lerpf(sheet_range().x, sheet_range().y, t)
 
 
 ## [param points] with a point added at ([param unit], [param value]), kept sorted:
@@ -443,12 +518,33 @@ func instrument_span(instrument: ChirpInstrument) -> Vector2:
 	return Vector2(start, timeline.to_units(timeline.to_seconds(start) + seconds))
 
 
+## Mute, solo and volume knob in instrument row [param row]'s header: {mute, solo, knob} rects.
+func header_controls(row: int) -> Dictionary:
+	var size := row_height - 10.0
+	var top := instrument_y(row) + 5.0
+	var knob := Rect2(header_width - 6.0 - size, top, size, size)
+	var solo := Rect2(knob.position.x - 3.0 - size, top, size, size)
+	var mute := Rect2(solo.position.x - 2.0 - size, top, size, size)
+	return {mute = mute, solo = solo, knob = knob}
+
+
 ## What is at [param point]: {area, index, part, unit}. area is "ruler", "marker",
 ## "instrument" or "empty"; part is "body", "start" or "end".
 func hit_test(point: Vector2) -> Dictionary:
 	var unit := x_to_unit(point.x)
 	var hit := {area = "empty", index = -1, part = "body", unit = unit}
-	if event == null or point.x < header_width:
+	if event == null:
+		return hit
+	if point.x < header_width:
+		var row := int((point.y - instrument_y(0)) / row_height)
+		if point.y >= instrument_y(0) and row < event.instruments.size() and event.instruments[row]:
+			hit.area = "header"
+			hit.index = row
+			hit.part = "label"
+			var controls := header_controls(row)
+			for part: String in controls:
+				if controls[part].grow(2.0).has_point(point):
+					hit.part = part
 		return hit
 	if point.y < ruler_height:
 		hit.area = "ruler"
@@ -492,8 +588,9 @@ func hit_test(point: Vector2) -> Dictionary:
 			hit.point = -1
 			hit.value = y_to_value(automation, point.y, lane)
 			var nearest := INF
-			for i in automation.points.size():
-				var at := Vector2(unit_to_x(automation.points[i].x), value_to_y(automation, automation.points[i].y, lane))
+			var points := lane_points(automation)
+			for i in points.size():
+				var at := Vector2(unit_to_x(points[i].x), value_to_y(automation, points[i].y, lane))
 				var distance := at.distance_to(point)
 				if distance <= point_radius + 4.0 and distance < nearest:
 					nearest = distance
