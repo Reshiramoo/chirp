@@ -16,6 +16,12 @@ enum Target { VOLUME, PITCH }
 
 
 func evaluate(definition: ChirpParameter, value: float) -> float:
+	return sample_curve(curve, definition, value)
+
+
+## Samples [param curve] at [param value]'s position within the parameter's range.
+## A missing curve gives 1.0 (no change).
+static func sample_curve(curve: Curve, definition: ChirpParameter, value: float) -> float:
 	if curve == null:
 		return 1.0
 	var lo := definition.get_min()

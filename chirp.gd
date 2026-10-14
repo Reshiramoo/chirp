@@ -6,7 +6,7 @@ extends Node
 ## var music := Chirp.create_instance("event:/bgms/main")
 ## music.start()
 ## Chirp.parameters.set_value("Danger", 0.8)        # global parameters
-## Chirp.mixer.set_vca_volume("Music", 0.5)         # buses, VCAs, pausing
+## Chirp.mixer.start_snapshot("Paused")             # buses, VCAs, snapshots, pausing
 ## Chirp.events.get_active_instances()              # event registry and instances
 ## [/codeblock]
 
@@ -23,7 +23,7 @@ const DEFAULT_SOUND_DIRECTORIES := {"res://audio": ""}
 var events: Events
 var mixer: Mixer
 var parameters: Parameters
-## Global parameters and VCAs, loaded from the "chirp/config" project setting.
+## Global parameters, VCAs, snapshots and bus automation, from the "chirp/config" project setting.
 var config: ChirpConfig
 
 var _voice_root: Node
@@ -52,6 +52,7 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	parameters._process(delta)
 	events._process(delta)
+	mixer._process(delta)
 
 
 func _exit_tree() -> void:
@@ -65,11 +66,11 @@ func _notification(what: int) -> void:
 			mixer._background_paused = what == NOTIFICATION_APPLICATION_PAUSED
 
 
-## Replaces the global parameters and VCAs.
+## Replaces the global parameters, VCAs, snapshots and bus automation.
 func apply_config(new_config: ChirpConfig) -> void:
 	config = new_config
 	parameters._configure(config.global_parameters)
-	mixer._configure(config.vcas)
+	mixer._configure(config.vcas, config.bus_automations, config.snapshots)
 
 
 ## Shortcut for [code]Chirp.events.create_instance()[/code].

@@ -6,8 +6,23 @@ extends Resource
 
 enum Kind { CONTINUOUS, DISCRETE, LABELED }
 
+## Built-in parameters are set automatically every frame from the event's position
+## relative to the listener; game code can't set them. Angles are in degrees.
+enum BuiltIn {
+	NONE, ## A normal parameter, set by game code.
+	DISTANCE, ## Distance to the listener. Set max_value to the distance you care about.
+	DISTANCE_NORMALIZED, ## 0 at the event's min distance, 1 at its max distance.
+	DIRECTION, ## Where the event is around the listener: 0 ahead, 90 right, -90 left, ±180 behind. In 2D "ahead" is up.
+	ELEVATION, ## Angle above (+) or below (-) the listener's horizontal plane. Always 0 in 2D.
+	EVENT_CONE_ANGLE, ## Angle between where the emitter faces and the listener: 0 facing it, 180 facing away.
+	EVENT_ORIENTATION, ## Like EVENT_CONE_ANGLE but signed: + when the listener is to the emitter's right.
+	SPEED, ## Speed of the event relative to the listener. Set max_value as needed.
+	SPEED_ABSOLUTE, ## Speed of the event itself. Set max_value as needed.
+}
+
 @export var name := ""
 @export var kind := Kind.CONTINUOUS
+@export var built_in := BuiltIn.NONE
 @export var min_value := 0.0
 @export var max_value := 1.0
 @export var default_value := 0.0
@@ -18,10 +33,24 @@ enum Kind { CONTINUOUS, DISCRETE, LABELED }
 
 
 func get_min() -> float:
+	match built_in:
+		BuiltIn.DISTANCE_NORMALIZED, BuiltIn.EVENT_CONE_ANGLE:
+			return 0.0
+		BuiltIn.DIRECTION, BuiltIn.EVENT_ORIENTATION:
+			return -180.0
+		BuiltIn.ELEVATION:
+			return -90.0
 	return 0.0 if kind == Kind.LABELED else min_value
 
 
 func get_max() -> float:
+	match built_in:
+		BuiltIn.DISTANCE_NORMALIZED:
+			return 1.0
+		BuiltIn.DIRECTION, BuiltIn.EVENT_ORIENTATION, BuiltIn.EVENT_CONE_ANGLE:
+			return 180.0
+		BuiltIn.ELEVATION:
+			return 90.0
 	return float(maxi(labels.size() - 1, 0)) if kind == Kind.LABELED else max_value
 
 

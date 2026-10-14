@@ -17,7 +17,7 @@ No native libraries, so it runs anywhere Godot does (desktop, Android, iOS, web)
    | Setting | Default | Meaning |
    |---|---|---|
    | `chirp/sound_directories` | `{"res://audio": ""}` | Folders to find sounds in, each mapped to a bus path (`""` = Master). |
-   | `chirp/config` | `res://audio/chirp_config.tres` | Optional `ChirpConfig` resource holding global parameters and VCAs. |
+   | `chirp/config` | `res://audio/chirp_config.tres` | Optional `ChirpConfig` resource holding global parameters, VCAs, snapshots and bus automation. |
    | `chirp/pause_on_app_background` | `true` | Pause every event while a mobile app is in the background. |
 
    For example, for sounds in `res://assets/sounds/bgms` and `res://assets/sounds/sfxs`:
@@ -46,8 +46,9 @@ the same name, it takes over that path.
 | `instruments` | What plays. One stream = single sound; several = playlist (shuffle / random / sequential). Per-instrument volume, pitch, random volume/pitch, delay, probability, loop. |
 | `sheet_mode` | `SIMULTANEOUS` triggers all instruments; `CONSECUTIVE` plays them one after another. |
 | `bus` | `"bus:/SFX/UI"` = the Godot bus named `UI`; `"bus:/"` = Master. Empty = its sound directory's bus. |
-| `parameters` | Local parameters: continuous, discrete or labeled, with optional seek speed. |
+| `parameters` | Local parameters: continuous, discrete or labeled, with optional seek speed. Or built-in (see below). |
 | `automations` | Parameter → volume or pitch through a `Curve` (X = parameter range 0..1). Tick `global` to read a global parameter. |
+| `modulators` | `ChirpLFO`s: sine, triangle, square, saw or random waves on volume (tremolo) or pitch (vibrato). |
 | `envelope` | AHDSR. `release` is the fade-out used by `stop()`. |
 | `max_instances` / `stealing` / `cooldown` | Voice limits: steal oldest, quietest, furthest, or refuse. |
 
@@ -75,7 +76,7 @@ Everything else is grouped by module:
 | Module | Calls |
 |---|---|
 | `Chirp.events` | `get_event`, `get_event_paths`, `register_event`, `create_instance`, `play_one_shot`, `play_one_shot_attached`, `get_active_instances`, `stop_all`, `scan` |
-| `Chirp.mixer` | `set_bus_volume`, `get_bus_volume`, `set_bus_mute`, `set_bus_paused`, `stop_bus_events`, `set_vca_volume`, `get_vca_volume`, `pause_all`, `mute_all` |
+| `Chirp.mixer` | `set_bus_volume`, `get_bus_volume`, `set_bus_mute`, `set_bus_paused`, `stop_bus_events`, `set_vca_volume`, `get_vca_volume`, `start_snapshot`, `get_active_snapshots`, `stop_all_snapshots`, `pause_all`, `mute_all` |
 | `Chirp.parameters` | `set_value`, `set_label`, `get_value` (global parameters) |
 
 ```gdscript
@@ -86,6 +87,49 @@ Chirp.mixer.set_bus_paused("bus:/SFX", true)   # pause menu
 Chirp.mixer.stop_bus_events("bus:/BGM")
 Chirp.mixer.pause_all(true)                    # e.g. while an ad shows
 ```
+
+### Built-in parameters
+
+Set a parameter's `built_in` and Chirp fills it in every frame from the event's position
+relative to the listener (the current `AudioListener2D/3D`, else the current camera).
+Automate on it like any other parameter, e.g. muffle a sound as it moves away.
+
+| Built-in | Value |
+|---|---|
+| `DISTANCE` / `DISTANCE_NORMALIZED` | Distance to the listener / 0..1 between the event's min and max distance |
+| `DIRECTION` | Where the event is around the listener: 0 ahead, 90 right, -90 left, ±180 behind (in 2D, "ahead" is up) |
+| `ELEVATION` | Degrees above or below the listener (3D) |
+| `EVENT_CONE_ANGLE` / `EVENT_ORIENTATION` | Angle between where the emitter faces (+X in 2D, -Z in 3D) and the listener, unsigned / signed |
+| `SPEED` / `SPEED_ABSOLUTE` | Speed relative to the listener / of the event itself |
+
+For `DISTANCE` and the speeds, set the parameter's `max_value` to the range you care about.
+
+## Mixing
+
+### Snapshots
+
+A **ChirpSnapshot** is a mixer state blended in while it's active: a pause menu that muffles
+the game, ducking music under dialogue, an underwater filter. Add snapshots to your `ChirpConfig`, then:
+
+```gdscript
+var paused := Chirp.mixer.start_snapshot("Paused")
+paused.intensity = 0.5      # half strength
+paused.stop()               # fades out with the snapshot's envelope release
+```
+
+Each snapshot has `bus_overrides`. An override can set a bus's volume, set one property of one of
+its effects (e.g. `cutoff_hz` of a low-pass filter), and switch that effect on while active.
+`OVERRIDE` mode moves toward the value as intensity rises; `BLEND` adds it.
+Higher `priority` snapshots apply last. An optional `envelope` fades the snapshot in and out, and
+`intensity_parameter` lets a global parameter drive its strength.
+
+### Bus automation
+
+`ChirpBusAutomation` entries in the `ChirpConfig` let a global parameter drive a bus's volume
+or an effect property through a curve, e.g. `"Danger"` closing a low-pass filter on the music bus.
+
+Chirp recomputes every bus it manages each frame: base volume × VCAs × bus automation, then
+snapshots by priority. Effect properties start from the value they had when Chirp first touched them.
 
 ## Play it from the scene
 
@@ -110,15 +154,18 @@ Emitters also offer initial `parameters`, `allow_fadeout`, `trigger_once` and an
 |---|---|
 | `chirp.gd` | The `Chirp` autoload: creates the modules, shortcuts for common calls |
 | `modules/` | `events.gd`, `mixer.gd`, `parameters.gd`. A new feature is a new module plus one line in `chirp.gd`. |
-| `resources/` | `ChirpEvent`, `ChirpInstrument`, `ChirpParameter`, `ChirpAutomation`, `ChirpEnvelope`, `ChirpVCA`, `ChirpConfig` |
-| `runtime/` | `ChirpEventInstance` |
+| `resources/` | `ChirpEvent`, `ChirpInstrument`, `ChirpParameter`, `ChirpAutomation`, `ChirpEnvelope`, `ChirpLFO`, `ChirpVCA`, `ChirpSnapshot`, `ChirpBusOverride`, `ChirpBusAutomation`, `ChirpConfig` |
+| `runtime/` | `ChirpEventInstance`, `ChirpSnapshotInstance` |
 | `nodes/` | `ChirpEmitter2D`, `ChirpEmitter3D` |
 
-## Known limits (v0.1)
+## Known limits
 
-- No timeline, logic markers, snapshots, banks or event editor yet.
+- No timeline, logic markers, banks or event editor yet.
 - Godot effects live on buses only, so there are no per-event effect chains.
 - `loop` on an instrument replays the stream when it ends; for gapless loops, enable looping
   in the stream's import settings.
-- Bus volumes set directly on `AudioServer` are overwritten when a VCA covering that bus changes;
-  use `Chirp.mixer.set_bus_volume()` instead.
+- Once Chirp manages a bus (VCA, automation, snapshot or `set_bus_volume`), it rewrites its volume every frame,
+  so set it with `Chirp.mixer.set_bus_volume()` rather than on `AudioServer`. The same goes for effect
+  properties Chirp automates.
+- Effects are addressed by their position in the bus's effect list, so reordering effects needs the
+  overrides updated.

@@ -25,6 +25,7 @@ enum Stealing {
 @export_range(0.01, 4.0, 0.01) var pitch_scale := 1.0
 @export var parameters: Array[ChirpParameter] = []
 @export var automations: Array[ChirpAutomation] = []
+@export var modulators: Array[ChirpLFO] = []
 @export var envelope: ChirpEnvelope
 
 @export_group("Instance Limits")

@@ -19,6 +19,12 @@ var _directories := {} # directory -> bus path
 var _active: Array[ChirpEventInstance] = []
 var _last_start_msec := {} # ChirpEvent -> Time.get_ticks_msec()
 var _start_counter := 0
+# Listener state, refreshed every frame for built-in parameters and stealing.
+var _listener_2d := Transform2D.IDENTITY
+var _listener_2d_velocity := Vector2.ZERO
+var _listener_3d := Transform3D.IDENTITY
+var _listener_3d_velocity := Vector3.ZERO
+var _listener_ready := false
 
 
 func _init(chirp: Node) -> void:
@@ -108,8 +114,37 @@ func stop_all(allow_fadeout := true) -> void:
 # --- internals ---------------------------------------------------------------------
 
 func _process(delta: float) -> void:
+	_update_listeners(delta)
 	for instance in _active.duplicate():
 		instance._process(delta)
+
+
+## The current AudioListener2D/3D if there is one, else the current camera.
+func _update_listeners(delta: float) -> void:
+	var viewport: Viewport = _chirp.get_viewport()
+	var listener_2d := Transform2D(0.0, viewport.get_visible_rect().size / 2.0)
+	var audio_listener_2d := viewport.get_audio_listener_2d()
+	var camera_2d := viewport.get_camera_2d()
+	if audio_listener_2d:
+		listener_2d = audio_listener_2d.global_transform
+	elif camera_2d:
+		var rotation := 0.0 if camera_2d.ignore_rotation else camera_2d.global_rotation
+		listener_2d = Transform2D(rotation, camera_2d.get_screen_center_position())
+
+	var listener_3d := Transform3D.IDENTITY
+	var audio_listener_3d := viewport.get_audio_listener_3d()
+	var camera_3d := viewport.get_camera_3d()
+	if audio_listener_3d:
+		listener_3d = audio_listener_3d.get_listener_transform()
+	elif camera_3d:
+		listener_3d = camera_3d.global_transform
+
+	if _listener_ready and delta > 0.0:
+		_listener_2d_velocity = (listener_2d.origin - _listener_2d.origin) / delta
+		_listener_3d_velocity = (listener_3d.origin - _listener_3d.origin) / delta
+	_listener_2d = listener_2d
+	_listener_3d = listener_3d
+	_listener_ready = true
 
 
 func _scan_directory(directory: String, prefix: String, bus: String) -> void:
@@ -194,14 +229,10 @@ func _register_stop(instance: ChirpEventInstance) -> void:
 
 func _listener_distance(instance: ChirpEventInstance) -> float:
 	var position: Variant = instance._position
-	var viewport: Viewport = _chirp.get_viewport()
 	if position is Vector2:
-		var camera := viewport.get_camera_2d()
-		var listener := camera.get_screen_center_position() if camera else viewport.get_visible_rect().size / 2.0
-		return position.distance_to(listener)
+		return position.distance_to(_listener_2d.origin)
 	if position is Vector3:
-		var camera_3d := viewport.get_camera_3d()
-		return position.distance_to(camera_3d.global_position) if camera_3d else position.length()
+		return position.distance_to(_listener_3d.origin)
 	return 0.0
 
 

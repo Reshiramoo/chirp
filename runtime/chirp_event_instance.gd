@@ -41,6 +41,10 @@ var _position: Variant = null
 var _attached: WeakRef
 var _attenuation := {}
 var _start_order := 0
+var _previous_position: Variant = null
+var _velocity: Variant = null # Vector2 or Vector3, from position changes
+var _lfo_seed := 0
+var _has_built_ins := false
 
 
 class Voice:
@@ -62,6 +66,7 @@ func _init(chirp: Node, event: ChirpEvent, bus: StringName) -> void:
 	for definition in event.parameters:
 		if definition:
 			_params[definition.name.to_lower()] = ChirpParameter.State.new(definition)
+			_has_built_ins = _has_built_ins or definition.built_in != ChirpParameter.BuiltIn.NONE
 
 
 func get_event() -> ChirpEvent:
@@ -91,9 +96,12 @@ func start() -> void:
 	_clear_voices()
 	_pending.clear()
 	_time = 0.0
+	_lfo_seed = randi()
 	_env_level = _event.envelope.level_at(0.0) if _event.envelope else 1.0
 	_state = State.PLAYING
 	_chirp.events._register_start(self)
+	if _has_built_ins:
+		_update_built_ins()
 	if _event.sheet_mode == ChirpEvent.SheetMode.CONSECUTIVE:
 		_next_consecutive = 0
 		_schedule_next_consecutive()
@@ -139,18 +147,14 @@ func get_paused() -> bool:
 
 
 func set_parameter(parameter_name: String, value: float) -> void:
-	var state: ChirpParameter.State = _params.get(parameter_name.to_lower())
-	if state == null:
-		_chirp._warn_once("param:%s:%s" % [_event.resource_path, parameter_name],
-			"Chirp: event has no parameter '%s'." % parameter_name)
-		return
-	state.set_target(value, _state == State.STOPPED)
+	var state := _settable_state(parameter_name)
+	if state:
+		state.set_target(value, _state == State.STOPPED)
 
 
 func set_parameter_by_label(parameter_name: String, label: String) -> void:
-	var state: ChirpParameter.State = _params.get(parameter_name.to_lower())
+	var state := _settable_state(parameter_name)
 	if state == null:
-		set_parameter(parameter_name, 0.0) # reports the missing parameter
 		return
 	var value := state.def.label_to_value(label)
 	if value < 0.0:
@@ -209,6 +213,13 @@ func _process(delta: float) -> void:
 	if _applied_paused:
 		return
 	_time += delta
+	if _attached:
+		var node = _attached.get_ref()
+		if node and node.is_inside_tree():
+			_position = node.global_position
+	_track_velocity(delta)
+	if _has_built_ins:
+		_update_built_ins()
 	for state: ChirpParameter.State in _params.values():
 		state.step(delta)
 
@@ -228,11 +239,6 @@ func _process(delta: float) -> void:
 			return
 	elif _event.envelope:
 		_env_level = _event.envelope.level_at(_time)
-
-	if _attached:
-		var node = _attached.get_ref()
-		if node and node.is_inside_tree():
-			_position = node.global_position
 
 	var volume_factor := _automation(ChirpAutomation.Target.VOLUME)
 	var pitch_factor := _automation(ChirpAutomation.Target.PITCH)
@@ -338,7 +344,112 @@ func _automation(target: ChirpAutomation.Target) -> float:
 			state = _params.get(automation.parameter.to_lower())
 		if state:
 			factor *= automation.evaluate(state.def, state.value)
+	for modulator in _event.modulators:
+		if modulator and int(modulator.target) == int(target):
+			factor *= modulator.factor(_time, _lfo_seed)
 	return factor
+
+
+func _settable_state(parameter_name: String) -> ChirpParameter.State:
+	var state: ChirpParameter.State = _params.get(parameter_name.to_lower())
+	if state == null:
+		_chirp._warn_once("param:%s:%s" % [_event.resource_path, parameter_name],
+			"Chirp: event has no parameter '%s'." % parameter_name)
+	elif state.def.built_in != ChirpParameter.BuiltIn.NONE:
+		_chirp._warn_once("builtin:%s:%s" % [_event.resource_path, parameter_name],
+			"Chirp: '%s' is a built-in parameter and is set automatically." % parameter_name)
+		return null
+	return state
+
+
+func _track_velocity(delta: float) -> void:
+	if _position == null or delta <= 0.0:
+		return
+	if _previous_position != null and typeof(_previous_position) == typeof(_position):
+		_velocity = (_position - _previous_position) / delta
+	_previous_position = _position
+
+
+## Facing direction of the attached node: +X in 2D, -Z in 3D.
+func _forward() -> Variant:
+	var node = _attached.get_ref() if _attached else null
+	if _position is Vector2:
+		return Vector2.RIGHT.rotated(node.global_rotation) if node is Node2D else Vector2.RIGHT
+	return -node.global_basis.z if node is Node3D else Vector3.FORWARD
+
+
+func _update_built_ins() -> void:
+	if _position == null:
+		return
+	var events = _chirp.events
+	var distance := 0.0
+	var direction := 0.0
+	var elevation := 0.0
+	var orientation := 0.0
+	var cone := 0.0
+	var speed := 0.0
+	var speed_absolute := 0.0
+	var max_distance := 0.0
+	var min_distance := 0.0
+	if _position is Vector2:
+		var listener: Transform2D = events._listener_2d
+		var offset: Vector2 = _position - listener.origin
+		var ahead := Vector2.UP.rotated(listener.get_rotation())
+		var facing: Vector2 = _forward()
+		distance = offset.length()
+		if distance > 0.0:
+			direction = rad_to_deg(ahead.angle_to(offset))
+			orientation = rad_to_deg(facing.angle_to(-offset))
+		var velocity: Vector2 = _velocity if _velocity is Vector2 else Vector2.ZERO
+		speed = (velocity - events._listener_2d_velocity).length()
+		speed_absolute = velocity.length()
+		max_distance = _attenuation.get("max_distance", _event.max_distance_2d)
+	else:
+		var listener: Transform3D = events._listener_3d
+		var offset: Vector3 = _position - listener.origin
+		var ahead := -listener.basis.z
+		var up := listener.basis.y
+		var right := listener.basis.x
+		var facing: Vector3 = _forward()
+		distance = offset.length()
+		if distance > 0.0:
+			direction = rad_to_deg(atan2(offset.dot(right), offset.dot(ahead)))
+			elevation = rad_to_deg(asin(clampf(offset.normalized().dot(up), -1.0, 1.0)))
+			var to_listener := -offset
+			var facing_right := facing.cross(Vector3.UP)
+			orientation = rad_to_deg(atan2(to_listener.dot(facing_right), to_listener.dot(facing)))
+		var velocity: Vector3 = _velocity if _velocity is Vector3 else Vector3.ZERO
+		speed = (velocity - events._listener_3d_velocity).length()
+		speed_absolute = velocity.length()
+		min_distance = _attenuation.get("unit_size", _event.unit_size_3d)
+		max_distance = _attenuation.get("max_distance", _event.max_distance_3d)
+	cone = absf(orientation)
+	var normalized := 0.0
+	if max_distance > min_distance:
+		normalized = clampf((distance - min_distance) / (max_distance - min_distance), 0.0, 1.0)
+
+	for state: ChirpParameter.State in _params.values():
+		var value := 0.0
+		match state.def.built_in:
+			ChirpParameter.BuiltIn.NONE:
+				continue
+			ChirpParameter.BuiltIn.DISTANCE:
+				value = distance
+			ChirpParameter.BuiltIn.DISTANCE_NORMALIZED:
+				value = normalized
+			ChirpParameter.BuiltIn.DIRECTION:
+				value = direction
+			ChirpParameter.BuiltIn.ELEVATION:
+				value = elevation
+			ChirpParameter.BuiltIn.EVENT_CONE_ANGLE:
+				value = cone
+			ChirpParameter.BuiltIn.EVENT_ORIENTATION:
+				value = orientation
+			ChirpParameter.BuiltIn.SPEED:
+				value = speed
+			ChirpParameter.BuiltIn.SPEED_ABSOLUTE:
+				value = speed_absolute
+		state.set_target(value, true)
 
 
 func _sync_pause() -> void:
