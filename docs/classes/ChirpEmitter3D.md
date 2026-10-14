@@ -58,14 +58,17 @@ The instance follows the emitter, so it plays as 3D audio.
 <a id="enum-trigger"></a>
 ### enum ChirpEmitterCore.Trigger
 
-Shared by ChirpEmitter2D and ChirpEmitter3D; write it as `ChirpEmitterCore.Trigger.READY` in code.
+Shared by ChirpEmitter2D, ChirpEmitter3D, [ChirpParameterTrigger](ChirpParameterTrigger.md) and
+[ChirpGlobalParameterTrigger](ChirpGlobalParameterTrigger.md); write it as
+`ChirpEmitterCore.Trigger.READY` in code.
 The trigger source is [trigger_source](#property-trigger_source), or the emitter's parent.
 
 - **NONE** = `0`: only through [play()](#method-play) / [stop()](#method-stop) from script.
 - **READY** = `1`: when the emitter enters the scene (deferred to the end of the frame).
 - **EXIT_TREE** = `2`: when the emitter leaves the scene, e.g. is freed.
-- **SHOWN** = `3`: when the emitter becomes visible in the tree.
-- **HIDDEN** = `4`: when the emitter becomes hidden.
+- **SHOWN** = `3`: when the node becomes visible in the tree. Nodes without visibility of their
+  own (the parameter triggers) follow their trigger source.
+- **HIDDEN** = `4`: when the node becomes hidden.
 - **ENTERED** = `5`: a body or area entered the trigger source, an `Area3D` (body or area) or a
   `RigidBody3D` (body contact; contact monitoring is switched on for you). Filtered by
   [trigger_group](#property-trigger_group).

@@ -27,6 +27,7 @@ No native libraries, so it runs anywhere Godot does (desktop, Android, iOS, web)
 - [Listeners and roll-off](#listeners-and-roll-off)
 - [Mixing](#mixing)
 - [Emitter nodes](#emitter-nodes)
+  - [Parameter triggers](#parameter-triggers)
 - [Editor tools](#editor-tools)
 - [Class reference](#class-reference)
 - [Limitations](#limitations)
@@ -335,6 +336,19 @@ The trigger source defaults to the emitter's parent. One-shot events start a new
 on every `play()` and `stop()` stops the newest one; looping events restart instead of
 stacking. Looping sounds stop when the emitter is freed; one-shots finish where they were.
 
+### Parameter triggers
+
+[ChirpParameterTrigger](docs/classes/ChirpParameterTrigger.md) sets parameters on emitters, and
+[ChirpGlobalParameterTrigger](docs/classes/ChirpGlobalParameterTrigger.md) sets global ones, on
+the same triggers: switch the music to its cave section when the player enters an `Area3D`,
+raise `"Danger"` in a boss arena and drop it on the way out, without code.
+
+```
+Area2D "Arena"
+  ├ ChirpGlobalParameterTrigger  trigger_on = ENTERED, trigger_group = "player", parameters = {"Danger": 1.0}
+  └ ChirpGlobalParameterTrigger  trigger_on = EXITED,  trigger_group = "player", parameters = {"Danger": 0.0}
+```
+
 ## Editor tools
 
 Enabling the plugin adds three docks and some inspector helpers. Sounds play through a private
@@ -389,6 +403,8 @@ One page per class, in the layout of Godot's class reference.
 | [ChirpEmitter3D](docs/classes/ChirpEmitter3D.md) | Node3D | Plays an event at its position, on triggers. |
 | [ChirpListener2D](docs/classes/ChirpListener2D.md) | Node2D | Where Chirp measures distance and direction from. |
 | [ChirpListener3D](docs/classes/ChirpListener3D.md) | Node3D | Where Chirp measures distance and direction from. |
+| [ChirpParameterTrigger](docs/classes/ChirpParameterTrigger.md) | Node | Sets parameters on emitters, on triggers. |
+| [ChirpGlobalParameterTrigger](docs/classes/ChirpGlobalParameterTrigger.md) | Node | Sets global parameters, on triggers. |
 
 ## Limitations
 

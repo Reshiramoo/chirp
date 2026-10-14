@@ -1,13 +1,14 @@
 class_name ChirpEmitterCore
 extends RefCounted
-## Shared behaviour of ChirpEmitter2D and ChirpEmitter3D.
+## Shared behaviour of ChirpEmitter2D and ChirpEmitter3D, and the trigger wiring used by the
+## parameter trigger nodes too.
 
 enum Trigger {
 	NONE, ## Only via play() / stop() from script.
 	READY, ## When the emitter enters the scene.
 	EXIT_TREE, ## When the emitter leaves the scene (e.g. is freed).
-	SHOWN, ## When the emitter becomes visible.
-	HIDDEN, ## When the emitter becomes hidden.
+	SHOWN, ## When the node becomes visible (nodes without visibility: their trigger source).
+	HIDDEN, ## When the node becomes hidden (nodes without visibility: their trigger source).
 	ENTERED, ## Trigger source Area / RigidBody: a body or area entered (filtered by trigger group).
 	EXITED, ## Trigger source Area / RigidBody: a body or area exited (filtered by trigger group).
 	MOUSE_ENTERED, ## Trigger source CollisionObject / Control: pointer entered.
@@ -26,8 +27,8 @@ func _init(host) -> void:
 
 
 func setup() -> void:
-	_wire(_host.play_on, play)
-	_wire(_host.stop_on, stop)
+	wire(_host.play_on, play)
+	wire(_host.stop_on, stop)
 
 
 func on_exit_tree() -> void:
@@ -125,7 +126,9 @@ func _matches_group(other: Node) -> bool:
 	return group.is_empty() or other.is_in_group(group)
 
 
-func _wire(trigger: Trigger, action: Callable) -> void:
+## Calls [param action] whenever [param trigger] fires, using the host's trigger_source and
+## trigger_group. EXIT_TREE is left to the host's _exit_tree().
+func wire(trigger: Trigger, action: Callable) -> void:
 	match trigger:
 		Trigger.NONE, Trigger.EXIT_TREE:
 			pass
@@ -133,8 +136,12 @@ func _wire(trigger: Trigger, action: Callable) -> void:
 			action.call_deferred()
 		Trigger.SHOWN, Trigger.HIDDEN:
 			var want_visible := trigger == Trigger.SHOWN
-			_host.visibility_changed.connect(func() -> void:
-				if _host.is_visible_in_tree() == want_visible:
+			var visual: Node = _host if _host.has_signal(&"visibility_changed") else _source()
+			if visual == null or not visual.has_signal(&"visibility_changed"):
+				_bad_source(trigger, "a CanvasItem or Node3D")
+				return
+			visual.visibility_changed.connect(func() -> void:
+				if visual.is_visible_in_tree() == want_visible:
 					action.call())
 		Trigger.ENTERED, Trigger.EXITED:
 			_wire_contact(trigger == Trigger.ENTERED, action)
