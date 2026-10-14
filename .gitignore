@@ -1,7 +1,2 @@
 .godot/
 .DS_Store
-
-# Local development/test project (not part of the published addon)
-/project.godot
-/tests/
-/FEATURES.md
