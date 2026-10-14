@@ -21,7 +21,10 @@ const EPSILON := 0.000001
 
 var event: ChirpEvent
 ## Pixels per timeline unit.
-var zoom := 60.0
+var zoom := 60.0:
+	set(value):
+		zoom = value
+		_flags_cache.clear() # flag stacking depends on pixel widths
 ## Timeline unit shown at the left edge of the track area.
 var scroll := 0.0
 var snap := Snap.BEAT
@@ -36,12 +39,17 @@ var lane_height := BASE_LANE_HEIGHT
 var row_height := BASE_ROW_HEIGHT
 var edge_grab := BASE_EDGE_GRAB
 
+## Width in pixels of a marker label; the view sets this from its font.
+var measure_text := func(text: String) -> float: return text.length() * 7.0
+
 var _region_lanes := {} # region ChirpMarker -> sub-lane index, so overlapping regions stack
 var _region_lane_count := 1
+var _flags_cache := {} # point-marker flags laid out at the current zoom: {flags, lanes}
 
 
 ## Scales every size by the editor's display scale (EditorInterface.get_editor_scale()).
 func set_display_scale(display_scale: float) -> void:
+	_flags_cache.clear()
 	header_width = BASE_HEADER_WIDTH * display_scale
 	ruler_height = BASE_RULER_HEIGHT * display_scale
 	lane_height = BASE_LANE_HEIGHT * display_scale
@@ -51,6 +59,7 @@ func set_display_scale(display_scale: float) -> void:
 
 ## Recompiles the event's timeline and region stacking (cheap; call whenever the event may have changed).
 func rebuild() -> void:
+	_flags_cache.clear()
 	timeline = Timeline.new(event) if event else null
 	_region_lanes.clear()
 	_region_lane_count = 1
@@ -141,7 +150,63 @@ func markers_lane_y() -> float:
 
 
 func regions_lane_y() -> float:
-	return ruler_height + (0.0 if is_sheet() else lane_height)
+	return ruler_height + (0.0 if is_sheet() else marker_lane_count() * lane_height)
+
+
+## Rows the point markers need so their flags don't overlap.
+func marker_lane_count() -> int:
+	return _flag_layout().lanes
+
+
+## Point markers' flags: [{index, marker, lane, rect}], rect in view pixels. Flags that would
+## overlap are stacked in rows, earliest first.
+func marker_flags() -> Array[Dictionary]:
+	var flags: Array[Dictionary] = []
+	for flag: Dictionary in _flag_layout().flags:
+		var marker: ChirpMarker = event.markers[flag.index]
+		flags.append({index = flag.index, marker = marker, lane = flag.lane, rect = Rect2(unit_to_x(marker.position),
+			markers_lane_y() + flag.lane * lane_height + 3.0, flag.width, lane_height - 6.0)})
+	return flags
+
+
+## Where marker [param index] is drawn: its flag, or its region bar. Empty when off-lane.
+func marker_rect(index: int) -> Rect2:
+	var marker := event.markers[index]
+	if marker.is_region():
+		return Rect2(unit_to_x(marker.position), regions_lane_y() + region_lane(marker) * lane_height + 3.0,
+			(marker.end - marker.position) * zoom, lane_height - 6.0)
+	for flag in marker_flags():
+		if flag.index == index:
+			return flag.rect
+	return Rect2()
+
+
+func _flag_layout() -> Dictionary:
+	if not _flags_cache.is_empty():
+		return _flags_cache
+	var flags := []
+	if event and not is_sheet():
+		for i in event.markers.size():
+			var marker := event.markers[i]
+			if marker and not marker.is_region():
+				flags.append({index = i, position = marker.position, width = measure_text.call(marker_label(marker)) + 10.0})
+	flags.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return a.position < b.position or a.position == b.position and a.index < b.index)
+	var lane_ends: Array[float] = [] # right edge of the last flag in each row, in units
+	for flag: Dictionary in flags:
+		var lane := lane_ends.size()
+		for i in lane_ends.size():
+			if lane_ends[i] <= flag.position + EPSILON:
+				lane = i
+				break
+		var end: float = flag.position + (flag.width + 4.0) / zoom
+		if lane == lane_ends.size():
+			lane_ends.append(end)
+		else:
+			lane_ends[lane] = end
+		flag.lane = lane
+	_flags_cache = {flags = flags, lanes = maxi(lane_ends.size(), 1)}
+	return _flags_cache
 
 
 func instrument_y(index: int) -> float:
@@ -319,16 +384,20 @@ func hit_test(point: Vector2) -> Dictionary:
 		hit.area = "ruler"
 		return hit
 	if point.y < regions_lane_y():
+		var flags := marker_flags()
+		for i in range(flags.size() - 1, -1, -1): # drawn last = on top
+			if flags[i].rect.grow(1.0).has_point(point):
+				hit.area = "marker"
+				hit.index = flags[i].index
+				return hit
+		# Off any flag: the nearest marker line within grab distance.
 		var nearest := INF
-		for i in event.markers.size():
-			var marker := event.markers[i]
-			if marker == null or marker.is_region():
-				continue
-			var distance := absf(unit_to_x(marker.position) - point.x)
+		for flag in flags:
+			var distance := absf(flag.rect.position.x - point.x)
 			if distance <= edge_grab and distance < nearest:
 				nearest = distance
 				hit.area = "marker"
-				hit.index = i
+				hit.index = flag.index
 		return hit
 	if point.y < instrument_y(0):
 		var lane := int((point.y - regions_lane_y()) / lane_height)
@@ -467,6 +536,49 @@ func plan_drop(point: Vector2, resources: Array, as_playlist := false) -> Dictio
 		# Timelines: length 0 follows the sound. Sheets: one coarse step (0 would run to the end).
 		instrument.length = bar_length_at(unit) if is_sheet() else 0.0
 	return {action = "create", unit = unit, instruments = instruments}
+
+
+## Text on a point marker's flag.
+static func marker_label(marker: ChirpMarker) -> String:
+	match marker.kind:
+		ChirpMarker.Kind.TEMPO:
+			var bpm := str(int(marker.bpm)) if is_equal_approx(marker.bpm, roundf(marker.bpm)) else str(snappedf(marker.bpm, 0.01))
+			return "%s BPM  %d/%d" % [bpm, marker.beats_per_bar, marker.beat_unit]
+		ChirpMarker.Kind.SUSTAIN_POINT:
+			return "sustain" + ("  if " + marker.condition_parameter if marker.condition_parameter else "")
+		ChirpMarker.Kind.DESTINATION:
+			return "◆ " + marker.name
+		ChirpMarker.Kind.TRANSITION:
+			return "→ " + marker.destination
+	return marker.name if marker.name else "marker"
+
+
+## The text property renaming a marker edits: "name", "destination" (transitions), or "" (none).
+static func rename_property(marker: ChirpMarker) -> String:
+	match marker.kind:
+		ChirpMarker.Kind.MARKER, ChirpMarker.Kind.DESTINATION:
+			return "name"
+		ChirpMarker.Kind.TRANSITION, ChirpMarker.Kind.TRANSITION_REGION:
+			return "destination"
+	return ""
+
+
+## The property changes renaming [param marker] to [param text] makes: [{resource, property,
+## before, after}]. Renaming a DESTINATION also retargets the transitions that pointed to it.
+func rename_changes(marker: ChirpMarker, text: String) -> Array[Dictionary]:
+	var changes: Array[Dictionary] = []
+	var property := rename_property(marker)
+	var old_text: String = marker.get(property) if property else ""
+	text = text.strip_edges()
+	if property.is_empty() or text == old_text:
+		return changes
+	changes.append({resource = marker, property = property, before = old_text, after = text})
+	if marker.kind == ChirpMarker.Kind.DESTINATION and not old_text.is_empty():
+		for other in event.markers:
+			if other and other.kind in [ChirpMarker.Kind.TRANSITION, ChirpMarker.Kind.TRANSITION_REGION] \
+					and other.destination == old_text:
+				changes.append({resource = other, property = "destination", before = old_text, after = text})
+	return changes
 
 
 ## A grid value as short text: no trailing zeros.

@@ -11,6 +11,7 @@ const TimelineModel := preload("timeline_model.gd")
 const ADD_INSTRUMENT := 100
 const DELETE := 200
 const INSPECT := 201
+const RENAME := 202
 
 var _plugin: EditorPlugin
 var _preview_dock: Node # the Chirp Preview dock, for the playhead and seeking
@@ -23,6 +24,8 @@ var _context := PopupMenu.new()
 var _context_unit := 0.0
 var _context_resource: Resource
 var _needs_fit := false
+var _rename_edit: LineEdit
+var _renaming: ChirpMarker
 var _shown_mode := -1 # sheet mode the view was set up for; switching it re-runs edit()
 
 
@@ -30,6 +33,7 @@ func setup(plugin: EditorPlugin, preview_dock: Node) -> void:
 	_plugin = plugin
 	_preview_dock = preview_dock
 	title = "Chirp Timeline"
+	_set_dock_icon(self, "timeline.svg")
 	layout_key = "chirp_timeline"
 	default_slot = DOCK_SLOT_BOTTOM
 	available_layouts = DOCK_LAYOUT_HORIZONTAL | DOCK_LAYOUT_FLOATING
@@ -91,9 +95,10 @@ func setup(plugin: EditorPlugin, preview_dock: Node) -> void:
 	_view.context_requested.connect(_on_context_requested)
 	_view.seek_requested.connect(_seek)
 	_view.drop_requested.connect(_on_drop)
+	_view.rename_requested.connect(_start_rename)
 
 	var hint := Label.new()
-	hint.text = "Drop audio files to add (Shift: as one playlist) · drag to move · drag edges to resize · Shift: no snap · right-click to add · Del deletes · Ctrl/Cmd+wheel zooms · Shift+wheel scrolls · click the ruler to seek"
+	hint.text = "Drop audio files to add (Shift: as one playlist) · double-click or F2 renames a marker · drag to move · drag edges to resize · Shift: no snap · right-click to add · Del deletes · Ctrl/Cmd+wheel zooms · Shift+wheel scrolls · click the ruler to seek"
 	hint.add_theme_color_override(&"font_color", EditorInterface.get_editor_theme().get_color(&"disabled_font_color", &"Editor"))
 	hint.clip_text = true
 	box.add_child(hint)
@@ -189,6 +194,8 @@ func _on_context_requested(screen_position: Vector2, hit: Dictionary) -> void:
 	_context_resource = _view.model.hit_resource(hit)
 	if _context_resource:
 		_context.add_icon_item(_icon("Edit"), "Inspect", INSPECT)
+		if _context_resource is ChirpMarker and not TimelineModel.rename_property(_context_resource).is_empty():
+			_context.add_icon_item(_icon("Rename"), "Rename", RENAME)
 		_context.add_icon_item(_icon("Remove"), "Delete", DELETE)
 		_context.add_separator()
 	_fill_add_menu(_context)
@@ -203,7 +210,7 @@ func _fill_add_menu(menu: PopupMenu) -> void:
 		return # parameter sheets have no markers
 	menu.add_separator("Add Marker")
 	for kind: int in ChirpMarker.Kind.values():
-		menu.add_item(ChirpMarker.Kind.keys()[kind].capitalize(), kind)
+		menu.add_icon_item(_marker_icon(kind), ChirpMarker.Kind.keys()[kind].capitalize(), kind)
 
 
 func _on_add(id: int, unit: float) -> void:
@@ -216,6 +223,10 @@ func _on_add(id: int, unit: float) -> void:
 			_delete(_context_resource)
 		INSPECT:
 			_on_item_selected(_context_resource)
+		RENAME:
+			var index := _event.markers.find(_context_resource)
+			if index >= 0:
+				_start_rename(_context_resource, model.marker_rect(index))
 		ADD_INSTRUMENT:
 			var instrument := ChirpInstrument.new()
 			instrument.start = at
@@ -259,6 +270,66 @@ func _on_drop(plan: Dictionary) -> void:
 		"Add %d Instrument%s" % [added.size(), "" if added.size() == 1 else "s"])
 	_view.selected = added[0]
 	_on_item_selected(added[0])
+
+
+## Shows a text field over [param marker] to rename it (or retarget a transition).
+func _start_rename(marker: ChirpMarker, rect: Rect2) -> void:
+	var property := TimelineModel.rename_property(marker)
+	if property.is_empty():
+		return
+	if _rename_edit == null:
+		_rename_edit = LineEdit.new()
+		_rename_edit.select_all_on_focus = true
+		_rename_edit.text_submitted.connect(func(_text: String) -> void: _finish_rename(true))
+		_rename_edit.focus_exited.connect(func() -> void: _finish_rename(true))
+		_rename_edit.gui_input.connect(func(input: InputEvent) -> void:
+			if input is InputEventKey and input.pressed and input.keycode == KEY_ESCAPE:
+				_finish_rename(false)
+				_rename_edit.accept_event())
+		_view.add_child(_rename_edit)
+	_renaming = marker
+	_rename_edit.placeholder_text = "Destination name" if property == "destination" else "Name"
+	_rename_edit.text = marker.get(property)
+	_rename_edit.position = Vector2(rect.position.x, rect.position.y - 2.0)
+	_rename_edit.size = Vector2(maxf(rect.size.x, 160.0 * EditorInterface.get_editor_scale()), 0.0)
+	_rename_edit.show()
+	_rename_edit.grab_focus()
+
+
+func _finish_rename(apply: bool) -> void:
+	var marker := _renaming
+	_renaming = null # before hiding: hiding drops focus, which calls this again
+	if marker == null:
+		return
+	_rename_edit.hide()
+	_view.grab_focus()
+	if not apply:
+		return
+	var changes := _view.model.rename_changes(marker, _rename_edit.text)
+	if changes.is_empty():
+		return
+	var undo_redo := _plugin.get_undo_redo()
+	undo_redo.create_action("Rename Marker" if changes.size() == 1 else "Rename Destination and Transitions")
+	for change in changes:
+		undo_redo.add_do_property(change.resource, change.property, change.after)
+		undo_redo.add_undo_property(change.resource, change.property, change.before)
+	undo_redo.add_do_method(self, "_changed", _event)
+	undo_redo.add_undo_method(self, "_changed", _event)
+	undo_redo.commit_action()
+
+
+## A small flag (point markers) or bar (regions) in the marker kind's timeline colour.
+static func _marker_icon(kind: int) -> Texture2D:
+	var unit := maxi(roundi(EditorInterface.get_editor_scale()), 1)
+	var image := Image.create_empty(16 * unit, 16 * unit, false, Image.FORMAT_RGBA8)
+	var color: Color = TimelineView.MARKER_COLORS[kind]
+	if kind in [ChirpMarker.Kind.LOOP_REGION, ChirpMarker.Kind.TRANSITION_REGION]:
+		image.fill_rect(Rect2i(Vector2i(1, 5) * unit, Vector2i(14, 6) * unit), Color(color, 0.45))
+		image.fill_rect(Rect2i(Vector2i(1, 5) * unit, Vector2i(14, 2) * unit), color)
+	else:
+		image.fill_rect(Rect2i(Vector2i(3, 1) * unit, Vector2i(2, 14) * unit), color)
+		image.fill_rect(Rect2i(Vector2i(5, 2) * unit, Vector2i(9, 6) * unit), color)
+	return ImageTexture.create_from_image(image)
 
 
 func _add_to(property: String, resource: Resource, action: String) -> void:
@@ -347,3 +418,11 @@ static func _event_name(event: ChirpEvent) -> String:
 static func _icon(icon_name: String) -> Texture2D:
 	var theme := EditorInterface.get_editor_theme()
 	return theme.get_icon(icon_name, &"EditorIcons") if theme.has_icon(icon_name, &"EditorIcons") else null
+
+
+## Loaded (not preloaded) so a freshly pulled icon that isn't imported yet can't break the plugin.
+static func _set_dock_icon(dock: EditorDock, file: String) -> void:
+	var path: String = (dock.get_script() as Script).resource_path.get_base_dir().path_join("../icons").path_join(file).simplify_path()
+	if ResourceLoader.exists(path):
+		dock.dock_icon = load(path)
+		dock.force_show_icon = true

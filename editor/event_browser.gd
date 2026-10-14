@@ -20,6 +20,7 @@ func setup(plugin: EditorPlugin, chirp: Node) -> void:
 	_plugin = plugin
 	_chirp = chirp
 	title = "Chirp"
+	_set_dock_icon(self, "chirp.svg")
 	layout_key = "chirp_browser"
 	default_slot = DOCK_SLOT_RIGHT_UL
 	available_layouts = DOCK_LAYOUT_VERTICAL | DOCK_LAYOUT_FLOATING
@@ -202,3 +203,11 @@ func _create_emitter() -> void:
 func _icon(icon_name: String) -> Texture2D:
 	var theme := EditorInterface.get_editor_theme()
 	return theme.get_icon(icon_name, &"EditorIcons") if theme.has_icon(icon_name, &"EditorIcons") else null
+
+
+## Loaded (not preloaded) so a freshly pulled icon that isn't imported yet can't break the plugin.
+static func _set_dock_icon(dock: EditorDock, file: String) -> void:
+	var path: String = (dock.get_script() as Script).resource_path.get_base_dir().path_join("../icons").path_join(file).simplify_path()
+	if ResourceLoader.exists(path):
+		dock.dock_icon = load(path)
+		dock.force_show_icon = true

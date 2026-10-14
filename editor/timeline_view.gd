@@ -6,6 +6,7 @@ extends Control
 ## Mouse: drag blocks/markers to move, drag their edges to resize (Shift: no snapping),
 ## click the ruler to seek, right-click for the add/delete menu, middle-drag to pan,
 ## Shift+wheel to scroll, Ctrl/Cmd+wheel to zoom. Delete removes the selection.
+## Double-click a marker (or F2) to rename it. Overlapping marker flags stack in rows.
 ## Drop audio files or ChirpEvents (from the FileSystem or Chirp dock) to add instruments,
 ## or onto a sound instrument to add to its playlist (Shift: several files as one playlist).
 
@@ -16,6 +17,8 @@ signal context_requested(screen_position: Vector2, hit: Dictionary)
 signal seek_requested(unit: float)
 ## Files were dropped; [param plan] comes from TimelineModel.plan_drop().
 signal drop_requested(plan: Dictionary)
+## Double-click / F2 on a renamable marker; [param rect] is where it's drawn, in view pixels.
+signal rename_requested(marker: ChirpMarker, rect: Rect2)
 
 const TimelineModel := preload("timeline_model.gd")
 
@@ -54,12 +57,19 @@ func _init() -> void:
 	focus_mode = Control.FOCUS_CLICK
 	clip_contents = true
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	model.measure_text = func(text: String) -> float:
+		var font := get_theme_font(&"font", &"Label")
+		return font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, _small_font_size()).x
+
+
+func _small_font_size() -> int:
+	return maxi(get_theme_font_size(&"font_size", &"Label") - 3, 8)
 
 
 func _draw() -> void:
 	var font := get_theme_font(&"font", &"Label")
 	var font_size := get_theme_font_size(&"font_size", &"Label")
-	var small := maxi(font_size - 3, 8)
+	var small := _small_font_size()
 	var text_color := get_theme_color(&"font_color", &"Label")
 	draw_rect(Rect2(Vector2.ZERO, size), Color(0, 0, 0, 0.18))
 	if model.event == null:
@@ -73,6 +83,9 @@ func _draw() -> void:
 
 	# Lane backgrounds
 	draw_rect(Rect2(0, 0, size.x, model.ruler_height), Color(0, 0, 0, 0.25))
+	if not model.is_sheet():
+		for lane in range(1, model.marker_lane_count(), 2):
+			draw_rect(Rect2(0, model.markers_lane_y() + lane * model.lane_height, size.x, model.lane_height), Color(1, 1, 1, 0.02))
 	if not model.is_sheet():
 		draw_rect(Rect2(0, model.regions_lane_y(), size.x, model.lane_height * model.region_lane_count()), Color(1, 1, 1, 0.02))
 	for i in event.instruments.size():
@@ -101,12 +114,12 @@ func _draw() -> void:
 		markers = event.markers
 
 	# Regions
-	for marker in markers:
+	for i in markers.size():
+		var marker := markers[i]
 		if marker == null or not marker.is_region():
 			continue
 		var color: Color = MARKER_COLORS[marker.kind]
-		var rect := Rect2(model.unit_to_x(marker.position), model.regions_lane_y() + model.region_lane(marker) * model.lane_height + 3,
-			(marker.end - marker.position) * model.zoom, model.lane_height - 6)
+		var rect := model.marker_rect(i)
 		draw_rect(rect, Color(color, 0.22))
 		draw_rect(Rect2(rect.position, Vector2(rect.size.x, 3)), color)
 		if marker == selected:
@@ -116,22 +129,18 @@ func _draw() -> void:
 			label += "  if %s" % marker.condition_parameter
 		_draw_clipped_text(font, small, label, rect.grow_individual(-4, 0, 0, 0), color.lightened(0.4))
 
-	# Point markers
-	for marker in markers:
-		if marker == null or marker.is_region():
-			continue
+	# Point markers: flags stacked in rows, each with a line down through the instruments
+	for flag in model.marker_flags():
+		var marker: ChirpMarker = flag.marker
 		var color: Color = MARKER_COLORS[marker.kind]
-		var x := model.unit_to_x(marker.position)
-		if x < left - 200 or x > size.x:
+		var rect: Rect2 = flag.rect
+		if rect.end.x < left or rect.position.x > size.x:
 			continue
-		draw_line(Vector2(x, model.markers_lane_y()), Vector2(x, size.y), Color(color, 0.45), 1.0)
-		var label := _marker_label(marker)
-		var width := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, small).x + 10
-		var flag := Rect2(x, model.markers_lane_y() + 3, width, model.lane_height - 6)
-		draw_rect(flag, Color(color, 0.85))
+		draw_line(Vector2(rect.position.x, rect.position.y), Vector2(rect.position.x, size.y), Color(color, 0.45), 1.0)
+		draw_rect(rect, Color(color, 0.85))
 		if marker == selected:
-			draw_rect(flag, Color.WHITE, false, 2.0)
-		_draw_clipped_text(font, small, label, flag.grow_individual(-5, 0, 0, 0), Color(0.08, 0.08, 0.1))
+			draw_rect(rect, Color.WHITE, false, 2.0)
+		_draw_clipped_text(font, small, TimelineModel.marker_label(marker), rect.grow_individual(-5, 0, 0, 0), Color(0.08, 0.08, 0.1))
 
 	# Instruments
 	for i in event.instruments.size():
@@ -183,7 +192,7 @@ func _draw() -> void:
 		header.call(parameter_name, 0, model.ruler_height, text_color.darkened(0.35))
 	else:
 		header.call("Bars (%s)" % ("beats" if model.in_beats() else "seconds"), 0, model.ruler_height, text_color.darkened(0.35))
-		header.call("Markers", model.markers_lane_y(), model.lane_height, text_color.darkened(0.2))
+		header.call("Markers", model.markers_lane_y(), model.lane_height * model.marker_lane_count(), text_color.darkened(0.2))
 		header.call("Regions", model.regions_lane_y(), model.lane_height, text_color.darkened(0.2))
 	for i in event.instruments.size():
 		var instrument := event.instruments[i]
@@ -270,7 +279,10 @@ func _gui_input(input: InputEvent) -> void:
 		accept_event()
 		queue_redraw()
 	elif input is InputEventKey and input.pressed:
-		if input.keycode in [KEY_DELETE, KEY_BACKSPACE] and selected:
+		if input.keycode == KEY_F2 and selected is ChirpMarker:
+			_request_rename(selected)
+			accept_event()
+		elif input.keycode in [KEY_DELETE, KEY_BACKSPACE] and selected:
 			delete_requested.emit(selected)
 			accept_event()
 		elif input.keycode == KEY_ESCAPE and not _drag.is_empty():
@@ -309,6 +321,9 @@ func _on_mouse_button(button: InputEventMouseButton) -> void:
 					"instrument", "marker":
 						var resource := model.hit_resource(hit)
 						_select(resource)
+						if button.double_click and resource is ChirpMarker:
+							_request_rename(resource)
+							return
 						_drag = {resource = resource, part = hit.part, origin = model.drag_origin(resource), start_unit = hit.unit}
 					_:
 						_select(null)
@@ -370,18 +385,10 @@ func _draw_fades(instrument: ChirpInstrument, rect: Rect2, color: Color) -> void
 		draw_line(Vector2(x, rect.position.y), rect.end, color.lightened(0.3), 1.5)
 
 
-func _marker_label(marker: ChirpMarker) -> String:
-	match marker.kind:
-		ChirpMarker.Kind.TEMPO:
-			var bpm := str(int(marker.bpm)) if is_equal_approx(marker.bpm, roundf(marker.bpm)) else str(snappedf(marker.bpm, 0.01))
-			return "%s BPM  %d/%d" % [bpm, marker.beats_per_bar, marker.beat_unit]
-		ChirpMarker.Kind.SUSTAIN_POINT:
-			return "sustain" + ("  if " + marker.condition_parameter if marker.condition_parameter else "")
-		ChirpMarker.Kind.DESTINATION:
-			return "◆ " + marker.name
-		ChirpMarker.Kind.TRANSITION:
-			return "→ " + marker.destination
-	return marker.name if marker.name else "marker"
+func _request_rename(marker: ChirpMarker) -> void:
+	if TimelineModel.rename_property(marker).is_empty():
+		return
+	rename_requested.emit(marker, model.marker_rect(model.event.markers.find(marker)))
 
 
 ## Text trimmed to [param rect] (and kept right of the header column), centred vertically.

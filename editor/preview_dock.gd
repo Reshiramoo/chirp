@@ -29,6 +29,7 @@ var _log_lines: Array[String] = []
 func setup(chirp: Node) -> void:
 	_chirp = chirp
 	title = "Chirp Preview"
+	_set_dock_icon(self, "preview.svg")
 	layout_key = "chirp_preview"
 	default_slot = DOCK_SLOT_BOTTOM
 	available_layouts = DOCK_LAYOUT_HORIZONTAL | DOCK_LAYOUT_FLOATING
@@ -325,3 +326,11 @@ static func _clear_children(node: Node) -> void:
 	for child in node.get_children():
 		node.remove_child(child)
 		child.queue_free()
+
+
+## Loaded (not preloaded) so a freshly pulled icon that isn't imported yet can't break the plugin.
+static func _set_dock_icon(dock: EditorDock, file: String) -> void:
+	var path: String = (dock.get_script() as Script).resource_path.get_base_dir().path_join("../icons").path_join(file).simplify_path()
+	if ResourceLoader.exists(path):
+		dock.dock_icon = load(path)
+		dock.force_show_icon = true
