@@ -1,0 +1,16 @@
+; Development/test project for the Audio Events addon.
+
+config_version=5
+
+[application]
+
+config/name="Audio Events"
+config/features=PackedStringArray("4.6")
+
+[autoload]
+
+AudioEvents="*res://addons/audio_events/audio_events.gd"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/audio_events/plugin.cfg")
