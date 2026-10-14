@@ -43,8 +43,9 @@ the same name, it takes over that path.
 
 | ChirpEvent property | Meaning |
 |---|---|
-| `instruments` | What plays. One stream = single sound; several = playlist (shuffle / random / sequential). Per-instrument volume, pitch, random volume/pitch, delay, probability, loop. |
-| `sheet_mode` | `SIMULTANEOUS` triggers all instruments; `CONSECUTIVE` plays them one after another. |
+| `instruments` | What plays. A `SOUND` instrument has one stream (single sound) or several (playlist: shuffle / random / sequential); `EVENT` nests another event; `SILENCE` waits. Per-instrument volume, pitch, random volume/pitch, delay, probability, a parameter condition and a cut behaviour. |
+| `sheet_mode` | `SIMULTANEOUS` triggers all instruments; `CONSECUTIVE` plays them one after another; `TIMELINE` places them on a timeline (see below). |
+| `persistent` | Keep playing after the content ends, until stopped. |
 | `bus` | `"bus:/SFX/UI"` = the Godot bus named `UI`; `"bus:/"` = Master. Empty = its sound directory's bus. |
 | `parameters` | Local parameters: continuous, discrete or labeled, with optional seek speed. Or built-in (see below). |
 | `automations` | Parameter → volume or pitch through a `Curve` (X = parameter range 0..1). Tick `global` to read a global parameter. |
@@ -69,6 +70,12 @@ music.stop()          # plays the envelope release
 music.stop(false)     # cuts immediately
 music.release()       # destroy once stopped
 music.stopped.connect(_on_music_stopped)
+
+# Timeline events
+music.timeline_beat.connect(func(bar, beat, position, tempo, signature): pass)
+music.timeline_marker.connect(func(marker_name, position): pass)
+music.key_off()                 # release a sustain point
+music.set_timeline_position(12.0)
 ```
 
 Everything else is grouped by module:
@@ -87,6 +94,37 @@ Chirp.mixer.set_bus_paused("bus:/SFX", true)   # pause menu
 Chirp.mixer.stop_bus_events("bus:/BGM")
 Chirp.mixer.pause_all(true)                    # e.g. while an ad shows
 ```
+
+### Timelines and interactive music
+
+With `sheet_mode = TIMELINE`, each instrument has a `start` and `length` on the event's timeline
+(`length` 0 = its sound's length). A playhead moves along the timeline: instruments start when it
+enters them (at the matching point in their sound) and stop when it leaves, unless `async_playback`
+lets them finish. Positions are in seconds, or in beats with `timeline_units = BEATS`.
+
+Everything else on the timeline is a **ChirpMarker** in the event's `markers` list:
+
+| Kind | Does |
+|---|---|
+| `MARKER` | Fires `timeline_marker(name, position)` |
+| `TEMPO` | BPM and time signature from here on; fires `timeline_beat(bar, beat, ...)` and sets the grid for quantization |
+| `LOOP_REGION` | Loops between `position` and `end` while its condition holds |
+| `SUSTAIN_POINT` | Holds the playhead until `key_off()` or its condition stops holding |
+| `DESTINATION` | A named point to jump to |
+| `TRANSITION` / `TRANSITION_REGION` | Jump to a destination when reached / while inside, if the condition holds, optionally on the next `BEAT` or `BAR` |
+
+Conditions are a parameter range (local or global) and a probability. Instruments can have
+conditions too, and a cut behaviour (`STOP` or `PLAY_TO_END`) for when it stops holding or a
+jump leaves them.
+
+A typical adaptive track: intro, then a loop region on the verse that holds while `Intensity` < 0.5,
+and a transition region over the verse that jumps to `"chorus"` on the next bar once `Intensity`
+reaches 0.5.
+
+**Timing:** the playhead moves once per frame, so markers and jumps are accurate to a frame, not a
+sample. For seamless loops, import the music with looping on and make the loop region the same
+length: when the playhead jumps, voices already at the right spot keep playing instead of
+restarting (anything more than 50 ms off is re-seeked).
 
 ### Built-in parameters
 
@@ -154,13 +192,16 @@ Emitters also offer initial `parameters`, `allow_fadeout`, `trigger_once` and an
 |---|---|
 | `chirp.gd` | The `Chirp` autoload: creates the modules, shortcuts for common calls |
 | `modules/` | `events.gd`, `mixer.gd`, `parameters.gd`. A new feature is a new module plus one line in `chirp.gd`. |
-| `resources/` | `ChirpEvent`, `ChirpInstrument`, `ChirpParameter`, `ChirpAutomation`, `ChirpEnvelope`, `ChirpLFO`, `ChirpVCA`, `ChirpSnapshot`, `ChirpBusOverride`, `ChirpBusAutomation`, `ChirpConfig` |
-| `runtime/` | `ChirpEventInstance`, `ChirpSnapshotInstance` |
+| `resources/` | `ChirpEvent`, `ChirpInstrument`, `ChirpMarker`, `ChirpParameter`, `ChirpAutomation`, `ChirpEnvelope`, `ChirpLFO`, `ChirpVCA`, `ChirpSnapshot`, `ChirpBusOverride`, `ChirpBusAutomation`, `ChirpConfig` |
+| `runtime/` | `ChirpEventInstance`, `ChirpSnapshotInstance`, `timeline.gd` (compiled timelines and tempo maps) |
 | `nodes/` | `ChirpEmitter2D`, `ChirpEmitter3D` |
 
 ## Known limits
 
-- No timeline, logic markers, banks or event editor yet.
+- No banks or event editor yet; timelines are set up in the inspector.
+- Timeline timing is frame-accurate, not sample-accurate (see Timelines).
+- Bars and beats count from each `TEMPO` marker; there is no global bar count across tempo changes.
+- `bpm` counts the bar's beats; `beat_unit` is only reported in `timeline_beat`.
 - Godot effects live on buses only, so there are no per-event effect chains.
 - `loop` on an instrument replays the stream when it ends; for gapless loops, enable looping
   in the stream's import settings.

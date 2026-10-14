@@ -7,6 +7,12 @@ extends Resource
 enum SheetMode {
 	SIMULTANEOUS, ## Trigger every instrument when the event starts.
 	CONSECUTIVE, ## Trigger instruments one after another, in list order.
+	TIMELINE, ## Instruments sit on a timeline (their start/length); markers control the playhead.
+}
+
+enum TimelineUnits {
+	SECONDS,
+	BEATS, ## Beats of the TEMPO markers (120 BPM before the first one).
 }
 
 enum Stealing {
@@ -18,6 +24,8 @@ enum Stealing {
 
 @export var instruments: Array[ChirpInstrument] = []
 @export var sheet_mode := SheetMode.SIMULTANEOUS
+## A persistent event keeps playing after its content ends, until stopped.
+@export var persistent := false
 ## "bus:/SFX" or "bus:/SFX/UI" (the last segment names the Godot bus), "bus:/" for Master.
 ## Empty = the bus of the sound directory the event is saved in (see the "chirp/sound_directories" setting).
 @export var bus := ""
@@ -27,6 +35,11 @@ enum Stealing {
 @export var automations: Array[ChirpAutomation] = []
 @export var modulators: Array[ChirpLFO] = []
 @export var envelope: ChirpEnvelope
+
+@export_group("Timeline")
+## Units for instrument start/length and marker positions on a TIMELINE event.
+@export var timeline_units := TimelineUnits.SECONDS
+@export var markers: Array[ChirpMarker] = []
 
 @export_group("Instance Limits")
 ## 0 = unlimited.
@@ -45,11 +58,18 @@ enum Stealing {
 @export var max_distance_3d := 0.0
 
 
-## True when the event ends by itself (no looping instruments).
+## True when the event ends by itself: not persistent, no looping instruments,
+## and no loop regions or sustain points.
 func is_one_shot() -> bool:
+	if persistent:
+		return false
 	for instrument in instruments:
 		if instrument and instrument.loop:
 			return false
+	if sheet_mode == SheetMode.TIMELINE:
+		for marker in markers:
+			if marker and (marker.kind == ChirpMarker.Kind.LOOP_REGION or marker.kind == ChirpMarker.Kind.SUSTAIN_POINT):
+				return false
 	return true
 
 

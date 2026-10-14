@@ -10,10 +10,18 @@ signal started
 signal restarted
 signal stopped
 signal destroyed
+## The playhead passed a MARKER on a TIMELINE event.
+signal timeline_marker(marker_name: String, position: float)
+## The playhead crossed a beat. Bars and beats count from 1, starting at the current TEMPO marker.
+signal timeline_beat(bar: int, beat: int, position: float, tempo: float, time_signature: Vector2i)
 
 enum State { STOPPED, PLAYING, STOPPING }
 
 enum Spatial { NONE, SPATIAL_2D, SPATIAL_3D }
+
+const Timeline := preload("timeline.gd")
+## How far (seconds) a voice may drift from the playhead after a jump before it is re-seeked.
+const RESYNC_TOLERANCE := 0.05
 
 ## Linear volume multiplier for this instance.
 var volume := 1.0
@@ -46,12 +54,26 @@ var _velocity: Variant = null # Vector2 or Vector3, from position changes
 var _lfo_seed := 0
 var _has_built_ins := false
 
+# Timeline playback (TIMELINE events only)
+var _timeline: Timeline
+var _playhead := 0.0
+var _sustain: Timeline.Mark # the sustain point holding the playhead, if any
+var _released_sustains := {} # Mark -> true: let past for the rest of this pass
+var _jump := {} # pending (quantized) transition: {time, target: Mark}
+var _jumped := false # the playhead jumped this frame
+var _entry_voices := {} # timeline entry index -> Voice
+var _entry_done := {} # timeline entry index -> true once triggered for this pass
+
 
 class Voice:
-	var player # AudioStreamPlayer, AudioStreamPlayer2D or AudioStreamPlayer3D
+	var player # AudioStreamPlayer, AudioStreamPlayer2D or AudioStreamPlayer3D (SOUND)
+	var child: ChirpEventInstance # EVENT
+	var silence_left := 0.0 # SILENCE
 	var gain := 1.0
 	var pitch := 1.0
 	var instrument: ChirpInstrument
+	var entry := -1 # timeline entry index, -1 when not following the timeline
+	var detached := false # left to play to its end, no longer controlled
 
 
 class Pending:
@@ -67,6 +89,8 @@ func _init(chirp: Node, event: ChirpEvent, bus: StringName) -> void:
 		if definition:
 			_params[definition.name.to_lower()] = ChirpParameter.State.new(definition)
 			_has_built_ins = _has_built_ins or definition.built_in != ChirpParameter.BuiltIn.NONE
+	if event.sheet_mode == ChirpEvent.SheetMode.TIMELINE:
+		_timeline = Timeline.new(event)
 
 
 func get_event() -> ChirpEvent:
@@ -102,13 +126,19 @@ func start() -> void:
 	_chirp.events._register_start(self)
 	if _has_built_ins:
 		_update_built_ins()
-	if _event.sheet_mode == ChirpEvent.SheetMode.CONSECUTIVE:
-		_next_consecutive = 0
-		_schedule_next_consecutive()
-	else:
-		for instrument in _event.instruments:
-			if instrument:
-				_schedule(instrument)
+	match _event.sheet_mode:
+		ChirpEvent.SheetMode.CONSECUTIVE:
+			_next_consecutive = 0
+			_schedule_next_consecutive()
+		ChirpEvent.SheetMode.TIMELINE:
+			_playhead = 0.0
+			_reset_timeline_pass()
+			_emit_timeline_events(-Timeline.EPSILON, 0.0)
+			_sync_entries()
+		_:
+			for instrument in _event.instruments:
+				if instrument:
+					_schedule(instrument)
 	if was_playing:
 		restarted.emit()
 	else:
@@ -206,6 +236,34 @@ func set_attenuation_3d(unit_size: float, max_distance: float) -> void:
 	_attenuation = {unit_size = unit_size, max_distance = max_distance}
 
 
+## Playhead position in seconds (TIMELINE events).
+func get_timeline_position() -> float:
+	return _playhead
+
+
+## Moves the playhead (TIMELINE events), in seconds. Instruments follow it.
+func set_timeline_position(position: float) -> void:
+	if _timeline == null:
+		push_warning("Chirp: set_timeline_position() needs a TIMELINE event.")
+		return
+	_jump_to(maxf(position, 0.0))
+	if is_playing():
+		_sync_entries()
+		_jumped = false
+
+
+## Releases the sustain point currently holding the playhead.
+func key_off() -> void:
+	if _sustain:
+		_released_sustains[_sustain] = true
+		_sustain = null
+
+
+## True while a sustain point is holding the playhead.
+func is_sustaining() -> bool:
+	return _sustain != null
+
+
 # --- driven by the Chirp autoload --------------------------------------------
 
 func _process(delta: float) -> void:
@@ -230,6 +288,17 @@ func _process(delta: float) -> void:
 			_pending.remove_at(i)
 			_trigger(pending.instrument)
 
+	if _timeline:
+		_advance_timeline(delta)
+		_sync_entries()
+	for voice in _voices.duplicate():
+		if voice.instrument.kind == ChirpInstrument.Kind.SILENCE:
+			voice.silence_left -= delta
+			if voice.silence_left <= 0.0:
+				_on_voice_finished(voice)
+		elif voice.entry == -1 and not voice.detached and not _instrument_condition(voice.instrument):
+			_cut(voice)
+
 	if _state == State.STOPPING:
 		_release_time += delta
 		var release := _event.envelope.release
@@ -245,7 +314,8 @@ func _process(delta: float) -> void:
 	for voice in _voices:
 		_apply(voice, volume_factor, pitch_factor)
 
-	if _state == State.PLAYING and _voices.is_empty() and _pending.is_empty():
+	if _state == State.PLAYING and _voices.is_empty() and _pending.is_empty() \
+			and not _event.persistent and _timeline_finished():
 		_finish_stop()
 
 
@@ -254,8 +324,10 @@ func _get_level() -> float:
 	return db_to_linear(_event.volume_db) * volume * _env_level
 
 
+# --- action and consecutive sheets -------------------------------------------------
+
 func _schedule(instrument: ChirpInstrument) -> bool:
-	if randf() * 100.0 >= instrument.probability:
+	if randf() * 100.0 >= instrument.probability or not _instrument_condition(instrument):
 		return false
 	if instrument.delay > 0.0:
 		var pending := Pending.new()
@@ -275,10 +347,230 @@ func _schedule_next_consecutive() -> void:
 			return
 
 
-func _trigger(instrument: ChirpInstrument) -> void:
-	var stream := instrument.pick_stream()
-	if stream == null:
+# --- timeline ------------------------------------------------------------------------
+
+func _reset_timeline_pass() -> void:
+	_sustain = null
+	_released_sustains.clear()
+	_jump = {}
+	_jumped = false
+	_entry_voices.clear()
+	_entry_done.clear()
+
+
+func _timeline_finished() -> bool:
+	if _timeline == null:
+		return true
+	return _playhead >= _timeline.length and _sustain == null and _jump.is_empty()
+
+
+## Moves the playhead forward by [param delta], handling sustain points, loop regions
+## and transitions. Several jumps can happen in one frame.
+func _advance_timeline(delta: float) -> void:
+	_jumped = false
+	if _sustain:
+		if _marker_condition(_sustain.marker):
+			return
+		_released_sustains[_sustain] = true
+		_sustain = null
+	var remaining := delta
+	for _i in 32: # guards against transitions that jump into themselves
+		if remaining <= 0.0:
+			return
+		var from := _playhead
+		var to := from + remaining
+		_schedule_transition(from, to)
+		var stop_at := to
+		var action := ""
+		var target: Timeline.Mark = null
+		for mark in _timeline.marks:
+			match mark.marker.kind:
+				ChirpMarker.Kind.SUSTAIN_POINT:
+					if mark.time > from and _earliest(mark.time, stop_at, action) \
+							and not _released_sustains.has(mark) and _marker_condition(mark.marker):
+						stop_at = mark.time
+						action = "sustain"
+						target = mark
+				ChirpMarker.Kind.LOOP_REGION:
+					if mark.end > mark.time and mark.end > from and _earliest(mark.end, stop_at, action) \
+							and _marker_condition(mark.marker):
+						stop_at = mark.end
+						action = "loop"
+						target = mark
+		if not _jump.is_empty() and _jump.time >= from and _jump.time <= stop_at:
+			stop_at = _jump.time
+			action = "jump"
+		_emit_timeline_events(from, stop_at)
+		_playhead = stop_at
+		remaining -= stop_at - from
+		match action:
+			"sustain":
+				_sustain = target
+				return
+			"loop":
+				if randf() * 100.0 < target.marker.probability:
+					_jump_to(target.time)
+			"jump":
+				_jump_to(_jump.target.time)
+
+
+## True when [param time] comes before the current stop point (or ties with the end of the frame).
+static func _earliest(time: float, stop_at: float, action: String) -> bool:
+	return time < stop_at or (time == stop_at and action.is_empty())
+
+
+## Arms a jump for the first transition reached in (from, to] whose condition holds.
+func _schedule_transition(from: float, to: float) -> void:
+	if not _jump.is_empty():
 		return
+	for mark in _timeline.marks:
+		var reached := -1.0
+		match mark.marker.kind:
+			ChirpMarker.Kind.TRANSITION:
+				if mark.time > from and mark.time <= to:
+					reached = mark.time
+			ChirpMarker.Kind.TRANSITION_REGION:
+				if mark.time <= to and mark.end > from:
+					reached = maxf(from, mark.time)
+		if reached < 0.0 or not _marker_condition(mark.marker) or randf() * 100.0 >= mark.marker.probability:
+			continue
+		var destination: Timeline.Mark = _timeline.destinations.get(mark.marker.destination)
+		if destination == null:
+			_chirp._warn_once("dest:%s:%s" % [_event.resource_path, mark.marker.destination],
+				"Chirp: no DESTINATION marker named '%s'." % mark.marker.destination)
+			continue
+		_jump = {time = _timeline.next_boundary(reached, mark.marker.quantization), target = destination}
+		return
+
+
+func _jump_to(time: float) -> void:
+	_playhead = time
+	_jumped = true
+	_jump = {}
+	_sustain = null
+	_released_sustains.clear()
+
+
+## Emits timeline_marker and timeline_beat for everything in (from, to], in order.
+func _emit_timeline_events(from: float, to: float) -> void:
+	if to <= from:
+		return
+	var events: Array[Dictionary] = []
+	for mark in _timeline.marks:
+		if mark.marker.kind == ChirpMarker.Kind.MARKER and mark.time > from and mark.time <= to:
+			events.append({time = mark.time, marker = mark.marker})
+	events.append_array(_timeline.beats_between(from, to))
+	events.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.time < b.time)
+	for event in events:
+		if event.has("marker"):
+			timeline_marker.emit(event.marker.name, event.time)
+		else:
+			var tempo: ChirpMarker = event.tempo.marker
+			timeline_beat.emit(event.bar, event.beat, event.time, tempo.bpm,
+				Vector2i(tempo.beats_per_bar, tempo.beat_unit))
+
+
+## Starts, stops and re-seeks instruments so they match the playhead.
+func _sync_entries() -> void:
+	for entry in _timeline.entries:
+		var inside := _playhead >= entry.start and _playhead < entry.end
+		var holds := _instrument_condition(entry.instrument)
+		var voice: Voice = _entry_voices.get(entry.index)
+		if voice:
+			if not inside:
+				if entry.instrument.async_playback \
+						or (_jumped and entry.instrument.cut_behavior == ChirpInstrument.CutBehavior.PLAY_TO_END):
+					_detach(voice)
+				else:
+					_stop_voice(voice)
+			elif not holds:
+				_cut(voice)
+			elif _jumped and not entry.instrument.async_playback:
+				_resync(voice, _playhead - entry.start)
+		if _entry_voices.has(entry.index):
+			continue
+		if not inside or _jumped:
+			_entry_done.erase(entry.index)
+		if inside and holds and _state == State.PLAYING and not _entry_done.has(entry.index):
+			_entry_done[entry.index] = true
+			if randf() * 100.0 < entry.instrument.probability:
+				var started_voice := _trigger(entry.instrument, _playhead - entry.start)
+				if started_voice:
+					started_voice.entry = entry.index
+					_entry_voices[entry.index] = started_voice
+
+
+func _resync(voice: Voice, expected: float) -> void:
+	if voice.player:
+		var length: float = voice.player.stream.get_length()
+		var drift: float = absf(voice.player.get_playback_position() - expected)
+		if length > 0.0:
+			drift = minf(drift, absf(length - drift)) # a looping stream may have wrapped
+		if drift > RESYNC_TOLERANCE:
+			if length > 0.0 and expected >= length:
+				_stop_voice(voice)
+			else:
+				voice.player.seek(expected)
+	elif voice.child and voice.child._timeline:
+		voice.child.set_timeline_position(expected)
+	elif voice.instrument.kind == ChirpInstrument.Kind.SILENCE:
+		voice.silence_left = voice.instrument.duration - expected
+
+
+# --- conditions ----------------------------------------------------------------------
+
+func _instrument_condition(instrument: ChirpInstrument) -> bool:
+	return _condition(instrument.condition_parameter, instrument.condition_min, instrument.condition_max)
+
+
+func _marker_condition(marker: ChirpMarker) -> bool:
+	return _condition(marker.condition_parameter, marker.condition_min, marker.condition_max)
+
+
+## True when [param parameter_name] (local first, then global) is within [lo, hi]. Empty = true.
+func _condition(parameter_name: String, lo: float, hi: float) -> bool:
+	if parameter_name.is_empty():
+		return true
+	var state: ChirpParameter.State = _params.get(parameter_name.to_lower())
+	if state == null:
+		state = _chirp.parameters._get_state(parameter_name)
+	if state == null:
+		_chirp._warn_once("cond:%s:%s" % [_event.resource_path, parameter_name],
+			"Chirp: condition uses unknown parameter '%s'; treating it as met." % parameter_name)
+		return true
+	return state.value >= lo - Timeline.EPSILON and state.value <= hi + Timeline.EPSILON
+
+
+# --- voices ----------------------------------------------------------------------------
+
+## Starts [param instrument], [param offset] seconds into its sound. Returns null if nothing plays.
+func _trigger(instrument: ChirpInstrument, offset := 0.0) -> Voice:
+	var voice := Voice.new()
+	voice.instrument = instrument
+	voice.gain = db_to_linear(instrument.volume_db - randf() * instrument.random_volume_db)
+	var detune := randf_range(-instrument.random_pitch_semitones, instrument.random_pitch_semitones)
+	voice.pitch = pow(2.0, (instrument.pitch_semitones + detune) / 12.0)
+	match instrument.kind:
+		ChirpInstrument.Kind.SILENCE:
+			voice.silence_left = instrument.duration - offset
+			if voice.silence_left <= 0.0:
+				return null
+			_voices.append(voice)
+		ChirpInstrument.Kind.EVENT:
+			if not _start_child(voice, offset):
+				return null
+		_:
+			if not _start_player(voice, offset):
+				return null
+	return voice
+
+
+func _start_player(voice: Voice, offset: float) -> bool:
+	var stream := voice.instrument.pick_stream()
+	if stream == null:
+		return false
+	if offset > 0.0 and stream.get_length() > 0.0 and offset >= stream.get_length():
+		return false
 	var player # AudioStreamPlayer, AudioStreamPlayer2D or AudioStreamPlayer3D
 	match _spatial:
 		Spatial.SPATIAL_2D:
@@ -295,41 +587,116 @@ func _trigger(instrument: ChirpInstrument) -> void:
 			player = AudioStreamPlayer.new()
 	player.stream = stream
 	player.bus = _bus
-
-	var voice := Voice.new()
 	voice.player = player
-	voice.instrument = instrument
-	voice.gain = db_to_linear(instrument.volume_db - randf() * instrument.random_volume_db)
-	var detune := randf_range(-instrument.random_pitch_semitones, instrument.random_pitch_semitones)
-	voice.pitch = pow(2.0, (instrument.pitch_semitones + detune) / 12.0)
 	_voices.append(voice)
-
 	_chirp._voice_root.add_child(player)
 	_apply(voice, _automation(ChirpAutomation.Target.VOLUME), _automation(ChirpAutomation.Target.PITCH))
 	player.finished.connect(_on_voice_finished.bind(voice))
-	player.play()
+	player.play(offset)
 	player.stream_paused = _applied_paused
+	return true
+
+
+func _start_child(voice: Voice, offset: float) -> bool:
+	var nested := voice.instrument.event
+	if nested == null or nested == _event:
+		return false
+	var child: ChirpEventInstance = _chirp.events.create_instance(nested)
+	if child == null:
+		return false
+	var node = _attached.get_ref() if _attached else null
+	if node:
+		child.attach_to(node)
+	elif _position != null:
+		child.set_position(_position)
+	child._attenuation = _attenuation
+	voice.child = child
+	_link_parameters(child)
+	child.stopped.connect(_on_voice_finished.bind(voice))
+	child.start()
+	if not child.is_playing():
+		return false
+	if offset > 0.0 and child._timeline:
+		child.set_timeline_position(offset)
+	child.release()
+	child.set_paused(_applied_paused)
+	_voices.append(voice)
+	_apply(voice, _automation(ChirpAutomation.Target.VOLUME), _automation(ChirpAutomation.Target.PITCH))
+	return true
+
+
+## Copies this instance's parameter values to same-named parameters of a nested event.
+func _link_parameters(child: ChirpEventInstance) -> void:
+	for parameter_name: String in child._params:
+		var own: ChirpParameter.State = _params.get(parameter_name)
+		var theirs: ChirpParameter.State = child._params[parameter_name]
+		if own and theirs.def.built_in == ChirpParameter.BuiltIn.NONE:
+			theirs.set_target(own.value, true)
 
 
 func _on_voice_finished(voice: Voice) -> void:
-	if voice.instrument.loop and _state == State.PLAYING:
+	if not _voices.has(voice):
+		return
+	if voice.player and voice.instrument.loop and not voice.detached and _state == State.PLAYING:
 		voice.player.play()
 		return
-	_voices.erase(voice)
-	voice.player.queue_free()
-	if _state == State.PLAYING and _event.sheet_mode == ChirpEvent.SheetMode.CONSECUTIVE:
+	_remove_voice(voice)
+	if voice.player:
+		voice.player.queue_free()
+	if _state == State.PLAYING and _event.sheet_mode == ChirpEvent.SheetMode.CONSECUTIVE and not voice.detached:
 		_schedule_next_consecutive()
 
 
+## Applies the instrument's cut behaviour: stop now, or let it finish on its own.
+func _cut(voice: Voice) -> void:
+	if voice.instrument.cut_behavior == ChirpInstrument.CutBehavior.PLAY_TO_END:
+		_detach(voice)
+	else:
+		_stop_voice(voice)
+
+
+func _detach(voice: Voice) -> void:
+	_entry_voices.erase(voice.entry)
+	voice.entry = -1
+	voice.detached = true
+
+
+func _stop_voice(voice: Voice) -> void:
+	_remove_voice(voice)
+	if voice.player and is_instance_valid(voice.player):
+		voice.player.stop()
+		voice.player.queue_free()
+	elif voice.child:
+		voice.child.stop(false)
+
+
+func _remove_voice(voice: Voice) -> void:
+	_voices.erase(voice)
+	if voice.entry >= 0 and _entry_voices.get(voice.entry) == voice:
+		_entry_voices.erase(voice.entry)
+
+
+func _clear_voices() -> void:
+	for voice in _voices.duplicate():
+		_stop_voice(voice)
+	_entry_voices.clear()
+
+
 func _apply(voice: Voice, volume_factor: float, pitch_factor: float) -> void:
-	var player = voice.player
 	var gain := _get_level() * voice.gain * volume_factor
-	player.volume_db = linear_to_db(gain) if gain > 0.00001 else -80.0
-	player.pitch_scale = maxf(_event.pitch_scale * pitch * voice.pitch * pitch_factor, 0.01)
-	if _position is Vector2 and player is AudioStreamPlayer2D:
-		player.global_position = _position
-	elif _position is Vector3 and player is AudioStreamPlayer3D:
-		player.global_position = _position
+	var final_pitch := maxf(_event.pitch_scale * pitch * voice.pitch * pitch_factor, 0.01)
+	if voice.player:
+		var player = voice.player
+		player.volume_db = linear_to_db(gain) if gain > 0.00001 else -80.0
+		player.pitch_scale = final_pitch
+		if _position is Vector2 and player is AudioStreamPlayer2D:
+			player.global_position = _position
+		elif _position is Vector3 and player is AudioStreamPlayer3D:
+			player.global_position = _position
+	elif voice.child:
+		voice.child.volume = gain
+		voice.child.pitch = final_pitch
+		_link_parameters(voice.child)
 
 
 func _automation(target: ChirpAutomation.Target) -> float:
@@ -349,6 +716,8 @@ func _automation(target: ChirpAutomation.Target) -> float:
 			factor *= modulator.factor(_time, _lfo_seed)
 	return factor
 
+
+# --- parameters & 3D ----------------------------------------------------------------
 
 func _settable_state(parameter_name: String) -> ChirpParameter.State:
 	var state: ChirpParameter.State = _params.get(parameter_name.to_lower())
@@ -452,31 +821,30 @@ func _update_built_ins() -> void:
 		state.set_target(value, true)
 
 
+# --- lifecycle ---------------------------------------------------------------------
+
 func _sync_pause() -> void:
 	var paused: bool = _paused or _chirp.mixer._is_bus_paused(_bus)
 	if paused == _applied_paused:
 		return
 	_applied_paused = paused
 	for voice in _voices:
-		voice.player.stream_paused = paused
+		if voice.player:
+			voice.player.stream_paused = paused
+		elif voice.child:
+			voice.child.set_paused(paused)
 
 
 func _finish_stop() -> void:
 	_clear_voices()
 	_pending.clear()
+	if _timeline:
+		_reset_timeline_pass()
 	_state = State.STOPPED
 	_chirp.events._register_stop(self)
 	stopped.emit()
 	if _released:
 		_destroy()
-
-
-func _clear_voices() -> void:
-	for voice in _voices:
-		if is_instance_valid(voice.player):
-			voice.player.stop()
-			voice.player.queue_free()
-	_voices.clear()
 
 
 func _destroy() -> void:
