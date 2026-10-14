@@ -6,12 +6,16 @@ extends Control
 ## Mouse: drag blocks/markers to move, drag their edges to resize (Shift: no snapping),
 ## click the ruler to seek, right-click for the add/delete menu, middle-drag to pan,
 ## Shift+wheel to scroll, Ctrl/Cmd+wheel to zoom. Delete removes the selection.
+## Drop audio files or ChirpEvents (from the FileSystem or Chirp dock) to add instruments,
+## or onto a sound instrument to add to its playlist (Shift: several files as one playlist).
 
 signal item_selected(resource: Resource)
 signal drag_finished(resource: Resource, before: Dictionary, after: Dictionary)
 signal delete_requested(resource: Resource)
 signal context_requested(screen_position: Vector2, hit: Dictionary)
 signal seek_requested(unit: float)
+## Files were dropped; [param plan] comes from TimelineModel.plan_drop().
+signal drop_requested(plan: Dictionary)
 
 const TimelineModel := preload("timeline_model.gd")
 
@@ -32,6 +36,7 @@ const MARKER_COLORS := {
 	ChirpMarker.Kind.TRANSITION_REGION: Color(1.0, 0.55, 0.25),
 }
 const PLAYHEAD_COLOR := Color(1.0, 0.3, 0.3)
+const DROP_COLOR := Color(0.45, 0.85, 1.0)
 
 var model := TimelineModel.new()
 var selected: Resource
@@ -41,6 +46,7 @@ var playhead := NAN
 var empty_message := "Select a ChirpEvent whose sheet mode is Timeline."
 
 var _drag := {} # {resource, part, origin, start_unit}
+var _drop_plan := {} # what the files being dragged over would do, for the preview
 var _panning := false
 
 
@@ -157,6 +163,9 @@ func _draw() -> void:
 			label += "  (%s)" % ", ".join(tags)
 		_draw_clipped_text(font, small, label, rect.grow_individual(-8, 0, 0, 0), text_color)
 
+	if not _drop_plan.is_empty():
+		_draw_drop_preview()
+
 	# Playhead
 	if not is_nan(playhead):
 		var x := model.unit_to_x(playhead)
@@ -183,6 +192,66 @@ func _draw() -> void:
 	if event.instruments.is_empty():
 		_draw_header_text(font, small, "No instruments: right-click to add one",
 			Rect2(8, instruments_top, size.x, model.row_height), text_color.darkened(0.35))
+
+
+func _can_drop_data(at_position: Vector2, data: Variant) -> bool:
+	var plan := model.plan_drop(at_position, _dropped_resources(data), Input.is_key_pressed(KEY_SHIFT))
+	if plan != _drop_plan:
+		_drop_plan = plan
+		queue_redraw()
+	return not plan.is_empty()
+
+
+func _drop_data(at_position: Vector2, data: Variant) -> void:
+	var plan := model.plan_drop(at_position, _dropped_resources(data), Input.is_key_pressed(KEY_SHIFT))
+	_clear_drop_preview()
+	if not plan.is_empty():
+		drop_requested.emit(plan)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_DRAG_END or what == NOTIFICATION_MOUSE_EXIT:
+		_clear_drop_preview()
+
+
+## Resources in a {type = "files"} drag (FileSystem dock, Chirp dock) that a timeline can use.
+static func _dropped_resources(data: Variant) -> Array:
+	var resources := []
+	if data is Dictionary and data.get("type") == "files":
+		for path: String in data.get("files", []):
+			if ResourceLoader.exists(path):
+				var resource := load(path)
+				if resource is AudioStream or resource is ChirpEvent:
+					resources.append(resource)
+	elif data is Dictionary and data.get("type") == "resource" and data.get("resource") is Resource:
+		resources.append(data.resource)
+	return resources
+
+
+func _clear_drop_preview() -> void:
+	if not _drop_plan.is_empty():
+		_drop_plan = {}
+		queue_redraw()
+
+
+## Outlines the instrument that would get the files, or the new blocks where they'd land.
+func _draw_drop_preview() -> void:
+	if _drop_plan.action == "append":
+		var span := model.instrument_span(model.event.instruments[_drop_plan.index])
+		var x1 := model.unit_to_x(span.y) if span.y != INF else size.x
+		draw_rect(Rect2(model.unit_to_x(span.x), model.instrument_y(_drop_plan.index) + 2,
+			x1 - model.unit_to_x(span.x), model.row_height - 4), DROP_COLOR, false, 2.0)
+		return
+	var x := model.unit_to_x(_drop_plan.unit)
+	var row := model.event.instruments.size()
+	for instrument: ChirpInstrument in _drop_plan.instruments:
+		var span := model.instrument_span(instrument)
+		var x1 := model.unit_to_x(span.y) if span.y != INF else minf(x + 120.0, size.x)
+		var rect := Rect2(x, model.instrument_y(row) + 3, maxf(x1 - x, 8.0), model.row_height - 6)
+		draw_rect(rect, Color(DROP_COLOR, 0.25))
+		draw_rect(rect, DROP_COLOR, false, 1.5)
+		row += 1
+	draw_line(Vector2(x, model.ruler_height), Vector2(x, size.y), DROP_COLOR, 1.5)
 
 
 func _gui_input(input: InputEvent) -> void:

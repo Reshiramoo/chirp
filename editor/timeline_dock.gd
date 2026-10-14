@@ -90,9 +90,10 @@ func setup(plugin: EditorPlugin, preview_dock: Node) -> void:
 	_view.delete_requested.connect(_delete)
 	_view.context_requested.connect(_on_context_requested)
 	_view.seek_requested.connect(_seek)
+	_view.drop_requested.connect(_on_drop)
 
 	var hint := Label.new()
-	hint.text = "Drag to move · drag edges to resize · Shift: no snap · right-click to add · Del deletes · Ctrl/Cmd+wheel zooms · Shift+wheel scrolls · click the ruler to seek"
+	hint.text = "Drop audio files to add (Shift: as one playlist) · drag to move · drag edges to resize · Shift: no snap · right-click to add · Del deletes · Ctrl/Cmd+wheel zooms · Shift+wheel scrolls · click the ruler to seek"
 	hint.add_theme_color_override(&"font_color", EditorInterface.get_editor_theme().get_color(&"disabled_font_color", &"Editor"))
 	hint.clip_text = true
 	box.add_child(hint)
@@ -229,6 +230,35 @@ func _on_add(id: int, unit: float) -> void:
 			if marker.kind == ChirpMarker.Kind.MARKER or marker.kind == ChirpMarker.Kind.DESTINATION:
 				marker.name = "%s %d" % ["marker" if marker.kind == ChirpMarker.Kind.MARKER else "destination", _event.markers.size() + 1]
 			_add_to("markers", marker, "Add %s" % ChirpMarker.Kind.keys()[id].capitalize())
+
+
+## Applies a TimelineModel.plan_drop() result as one undoable action.
+func _on_drop(plan: Dictionary) -> void:
+	if _event == null or _view.model.event == null:
+		return
+	if plan.action == "append":
+		var instrument: ChirpInstrument = _event.instruments[plan.index]
+		var before := instrument.streams.duplicate()
+		var after := instrument.streams.duplicate()
+		after.append_array(plan.streams)
+		var undo_redo := _plugin.get_undo_redo()
+		undo_redo.create_action("Add %d Sound%s to Playlist" % [plan.streams.size(), "" if plan.streams.size() == 1 else "s"])
+		undo_redo.add_do_property(instrument, "streams", after)
+		undo_redo.add_undo_property(instrument, "streams", before)
+		undo_redo.add_do_method(self, "_changed", instrument)
+		undo_redo.add_undo_method(self, "_changed", instrument)
+		undo_redo.commit_action()
+		_view.selected = instrument
+		_on_item_selected(instrument)
+		return
+	var added: Array = plan.instruments
+	var before: Array = _event.instruments
+	var after := before.duplicate()
+	after.append_array(added)
+	_commit_array("instruments", before.duplicate(), after,
+		"Add %d Instrument%s" % [added.size(), "" if added.size() == 1 else "s"])
+	_view.selected = added[0]
+	_on_item_selected(added[0])
 
 
 func _add_to(property: String, resource: Resource, action: String) -> void:

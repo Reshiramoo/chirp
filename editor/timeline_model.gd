@@ -425,6 +425,50 @@ func _min_length(unit: float) -> float:
 	return length
 
 
+## What dropping [param resources] (AudioStreams and ChirpEvents) at [param point] would do:
+## {action = "append", index, streams} adds audio to the SOUND or SCATTERER instrument under the
+## point; {action = "create", unit, instruments} adds new instruments there (one per resource, or
+## one playlist of all the audio with [param as_playlist]). Empty when nothing can be dropped.
+func plan_drop(point: Vector2, resources: Array, as_playlist := false) -> Dictionary:
+	if event == null:
+		return {}
+	var streams: Array[AudioStream] = []
+	var events: Array[ChirpEvent] = []
+	for resource in resources:
+		if resource is AudioStream:
+			streams.append(resource)
+		elif resource is ChirpEvent and resource != event:
+			events.append(resource)
+	if streams.is_empty() and events.is_empty():
+		return {}
+	var hit := hit_test(point)
+	if hit.area == "instrument" and events.is_empty():
+		var target: ChirpInstrument = event.instruments[hit.index]
+		if target.kind in [ChirpInstrument.Kind.SOUND, ChirpInstrument.Kind.SCATTERER]:
+			return {action = "append", index = hit.index, streams = streams}
+	var unit := snap_unit(maxf(x_to_unit(maxf(point.x, header_width)), min_unit()))
+	var instruments: Array[ChirpInstrument] = []
+	if as_playlist and not streams.is_empty():
+		var playlist := ChirpInstrument.new()
+		playlist.streams = streams
+		instruments.append(playlist)
+	else:
+		for stream in streams:
+			var single := ChirpInstrument.new()
+			single.streams.append(stream)
+			instruments.append(single)
+	for nested in events:
+		var instrument := ChirpInstrument.new()
+		instrument.kind = ChirpInstrument.Kind.EVENT
+		instrument.event = nested
+		instruments.append(instrument)
+	for instrument in instruments:
+		instrument.start = unit
+		# Timelines: length 0 follows the sound. Sheets: one coarse step (0 would run to the end).
+		instrument.length = bar_length_at(unit) if is_sheet() else 0.0
+	return {action = "create", unit = unit, instruments = instruments}
+
+
 ## A grid value as short text: no trailing zeros.
 static func _number(value: float) -> String:
 	value = snappedf(value, 0.0001)
