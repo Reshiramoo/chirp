@@ -1,5 +1,5 @@
 @tool
-class_name AudioEvent
+class_name ChirpEvent
 extends Resource
 ## An instanceable unit of sound: instruments plus the parameters, automation and
 ## envelope that control them. Equivalent to an FMOD Studio event with an action sheet.
@@ -16,15 +16,16 @@ enum Stealing {
 	NONE, ## Don't start the new instance.
 }
 
-@export var instruments: Array[AudioEventInstrument] = []
+@export var instruments: Array[ChirpInstrument] = []
 @export var sheet_mode := SheetMode.SIMULTANEOUS
-## "bus:/" for Master, otherwise "bus:/SFX" or "bus:/SFX/UI" (the last segment names the Godot bus).
-@export var bus := "bus:/"
+## "bus:/SFX" or "bus:/SFX/UI" (the last segment names the Godot bus), "bus:/" for Master.
+## Empty = the bus of the sound directory the event is saved in (see the "chirp/sound_directories" setting).
+@export var bus := ""
 @export_range(-80.0, 24.0, 0.1, "suffix:dB") var volume_db := 0.0
 @export_range(0.01, 4.0, 0.01) var pitch_scale := 1.0
-@export var parameters: Array[AudioEventParameter] = []
-@export var automations: Array[AudioEventAutomation] = []
-@export var envelope: AudioEventEnvelope
+@export var parameters: Array[ChirpParameter] = []
+@export var automations: Array[ChirpAutomation] = []
+@export var envelope: ChirpEnvelope
 
 @export_group("Instance Limits")
 ## 0 = unlimited.
@@ -51,7 +52,7 @@ func is_one_shot() -> bool:
 	return true
 
 
-func find_parameter(parameter_name: String) -> AudioEventParameter:
+func find_parameter(parameter_name: String) -> ChirpParameter:
 	for parameter in parameters:
 		if parameter and parameter.name.nocasecmp_to(parameter_name) == 0:
 			return parameter

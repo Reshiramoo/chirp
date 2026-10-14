@@ -1,12 +1,12 @@
 @icon("res://addons/chirp/icons/emitter.svg")
-class_name AudioEventEmitter2D
+class_name ChirpEmitter2D
 extends Node2D
-## Plays an AudioEvent at this node's position, following it as it moves.
+## Plays a ChirpEvent at this node's position, following it as it moves.
 ## One-shot events start a new instance on every play(); looping events restart.
 
-@export var event: AudioEvent
-@export var play_on := AudioEventEmitterCore.Trigger.NONE
-@export var stop_on := AudioEventEmitterCore.Trigger.NONE
+@export var event: ChirpEvent
+@export var play_on := ChirpEmitterCore.Trigger.NONE
+@export var stop_on := ChirpEmitterCore.Trigger.NONE
 ## Node whose signals drive ENTERED / EXITED / MOUSE_* triggers. Empty = parent.
 @export var trigger_source: NodePath
 ## Only bodies/areas in this group fire ENTERED / EXITED. Empty = any.
@@ -23,7 +23,7 @@ extends Node2D
 @export var max_distance := 2000.0
 @export_exp_easing("attenuation") var attenuation := 1.0
 
-var _core := AudioEventEmitterCore.new(self)
+var _core := ChirpEmitterCore.new(self)
 
 
 func _ready() -> void:

@@ -1,5 +1,5 @@
 @tool
-class_name AudioEventEnvelope
+class_name ChirpEnvelope
 extends Resource
 ## AHDSR volume envelope for an event. Release is the fade-out used when the event
 ## is stopped with fade-out allowed.

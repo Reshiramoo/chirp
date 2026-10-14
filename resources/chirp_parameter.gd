@@ -1,5 +1,5 @@
 @tool
-class_name AudioEventParameter
+class_name ChirpParameter
 extends Resource
 ## A named value that game code sets at run time to drive an event (local) or the
 ## whole mix (global). Mirrors FMOD Studio's continuous / discrete / labeled parameters.
@@ -41,11 +41,11 @@ func label_to_value(label: String) -> float:
 
 ## Live value of one parameter, owned by an event instance (local) or the manager (global).
 class State:
-	var def: AudioEventParameter
+	var def: ChirpParameter
 	var value := 0.0
 	var target := 0.0
 
-	func _init(definition: AudioEventParameter) -> void:
+	func _init(definition: ChirpParameter) -> void:
 		def = definition
 		value = def.clamp_value(def.default_value)
 		target = value

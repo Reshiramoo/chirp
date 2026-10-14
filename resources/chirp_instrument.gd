@@ -1,5 +1,5 @@
 @tool
-class_name AudioEventInstrument
+class_name ChirpInstrument
 extends Resource
 ## Something an event plays. One stream = FMOD "single instrument";
 ## several streams = "multi instrument" (a playlist picked from on every trigger).

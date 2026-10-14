@@ -1,6 +1,6 @@
-class_name AudioEventEmitterCore
+class_name ChirpEmitterCore
 extends RefCounted
-## Shared behaviour of AudioEventEmitter2D and AudioEventEmitter3D.
+## Shared behaviour of ChirpEmitter2D and ChirpEmitter3D.
 
 enum Trigger {
 	NONE, ## Only via play() / stop() from script.
@@ -17,7 +17,7 @@ enum Trigger {
 }
 
 var _host # the emitter node (untyped: its exported properties are read dynamically); its exported properties configure this core
-var _instances: Array[AudioEventInstance] = []
+var _instances: Array[ChirpEventInstance] = []
 var _played := false
 
 
@@ -42,7 +42,7 @@ func on_exit_tree() -> void:
 
 
 func play() -> void:
-	var event: AudioEvent = _host.event
+	var event: ChirpEvent = _host.event
 	if event == null:
 		push_warning("%s: no event assigned." % _host.get_path())
 		return
@@ -56,7 +56,7 @@ func play() -> void:
 			if instance.is_playing():
 				instance.start()
 				return
-	var instance: AudioEventInstance = _host.get_node("/root/AudioEvents").create_instance(event)
+	var instance: ChirpEventInstance = _host.get_node("/root/Chirp").create_instance(event)
 	if instance == null:
 		return
 	instance.attach_to(_host)
@@ -90,11 +90,11 @@ func is_playing() -> bool:
 
 
 func _prune() -> void:
-	_instances.assign(_instances.filter(func(i: AudioEventInstance) -> bool:
+	_instances.assign(_instances.filter(func(i: ChirpEventInstance) -> bool:
 		return i.is_playing() or not i.get_event().is_one_shot()))
 
 
-func _apply_attenuation(instance: AudioEventInstance) -> void:
+func _apply_attenuation(instance: ChirpEventInstance) -> void:
 	if not _host.override_attenuation:
 		return
 	if _host is Node2D:

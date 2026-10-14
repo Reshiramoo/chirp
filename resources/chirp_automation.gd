@@ -1,5 +1,5 @@
 @tool
-class_name AudioEventAutomation
+class_name ChirpAutomation
 extends Resource
 ## Maps a parameter onto an event property through a curve.
 ## The curve's X axis spans the parameter's range (0 = min, 1 = max).
@@ -15,7 +15,7 @@ enum Target { VOLUME, PITCH }
 @export var curve: Curve
 
 
-func evaluate(definition: AudioEventParameter, value: float) -> float:
+func evaluate(definition: ChirpParameter, value: float) -> float:
 	if curve == null:
 		return 1.0
 	var lo := definition.get_min()

@@ -1,0 +1,93 @@
+extends Node
+## Chirp autoload: the runtime entry point. Each area lives in its own module:
+##
+## [codeblock]
+## Chirp.play_one_shot("event:/sfxs/coin")          # shortcuts for the common calls
+## var music := Chirp.create_instance("event:/bgms/main")
+## music.start()
+## Chirp.parameters.set_value("Danger", 0.8)        # global parameters
+## Chirp.mixer.set_vca_volume("Music", 0.5)         # buses, VCAs, pausing
+## Chirp.events.get_active_instances()              # event registry and instances
+## [/codeblock]
+
+const Events := preload("modules/events.gd")
+const Mixer := preload("modules/mixer.gd")
+const Parameters := preload("modules/parameters.gd")
+
+const SETTING_CONFIG := "chirp/config"
+const SETTING_SOUND_DIRECTORIES := "chirp/sound_directories"
+const SETTING_PAUSE_IN_BACKGROUND := "chirp/pause_on_app_background"
+const DEFAULT_CONFIG := "res://audio/chirp_config.tres"
+const DEFAULT_SOUND_DIRECTORIES := {"res://audio": ""}
+
+var events: Events
+var mixer: Mixer
+var parameters: Parameters
+## Global parameters and VCAs, loaded from the "chirp/config" project setting.
+var config: ChirpConfig
+
+var _voice_root: Node
+var _warned := {}
+
+
+func _init() -> void:
+	events = Events.new(self)
+	mixer = Mixer.new(self)
+	parameters = Parameters.new(self)
+
+
+func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	_voice_root = Node.new()
+	_voice_root.name = "Voices"
+	add_child(_voice_root)
+	var path: String = ProjectSettings.get_setting(SETTING_CONFIG, DEFAULT_CONFIG)
+	var loaded: ChirpConfig = null
+	if ResourceLoader.exists(path):
+		loaded = load(path) as ChirpConfig
+	apply_config(loaded if loaded else ChirpConfig.new())
+	events.scan(ProjectSettings.get_setting(SETTING_SOUND_DIRECTORIES, DEFAULT_SOUND_DIRECTORIES))
+
+
+func _process(delta: float) -> void:
+	parameters._process(delta)
+	events._process(delta)
+
+
+func _exit_tree() -> void:
+	# Players still mixing at shutdown keep their playbacks alive and leak.
+	events.stop_all(false)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_APPLICATION_RESUMED:
+		if ProjectSettings.get_setting(SETTING_PAUSE_IN_BACKGROUND, true):
+			mixer._background_paused = what == NOTIFICATION_APPLICATION_PAUSED
+
+
+## Replaces the global parameters and VCAs.
+func apply_config(new_config: ChirpConfig) -> void:
+	config = new_config
+	parameters._configure(config.global_parameters)
+	mixer._configure(config.vcas)
+
+
+## Shortcut for [code]Chirp.events.create_instance()[/code].
+func create_instance(event_or_path: Variant) -> ChirpEventInstance:
+	return events.create_instance(event_or_path)
+
+
+## Shortcut for [code]Chirp.events.play_one_shot()[/code].
+func play_one_shot(event_or_path: Variant, position: Variant = null) -> ChirpEventInstance:
+	return events.play_one_shot(event_or_path, position)
+
+
+## Shortcut for [code]Chirp.events.play_one_shot_attached()[/code].
+func play_one_shot_attached(event_or_path: Variant, node: Node) -> ChirpEventInstance:
+	return events.play_one_shot_attached(event_or_path, node)
+
+
+func _warn_once(key: String, message: String) -> void:
+	if not _warned.has(key):
+		_warned[key] = true
+		push_warning(message)
