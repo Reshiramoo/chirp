@@ -48,6 +48,8 @@ The inspector only shows the properties the chosen [kind](#property-kind) uses.
 | [CutBehavior](#enum-cutbehavior) | [cut_behavior](#property-cut_behavior) | `STOP` |
 | float | [delay](#property-delay) | `0.0` |
 | float | [duration](#property-duration) | `1.0` |
+| float | [fade_in](#property-fade_in) | `0.0` |
+| float | [fade_out](#property-fade_out) | `0.0` |
 | [ChirpEvent](ChirpEvent.md) | [event](#property-event) | `null` |
 | [Kind](#enum-kind) | [kind](#property-kind) | `SOUND` |
 | float | [length](#property-length) | `0.0` |
@@ -107,7 +109,8 @@ How a playlist (several streams) picks the next stream.
 <a id="enum-cutbehavior"></a>
 ### enum CutBehavior
 
-What happens when the instrument's condition stops holding, or a timeline jump leaves it.
+What happens when the instrument's condition stops holding, a timeline jump leaves it, or a
+parameter sheet's value leaves its range.
 
 - **STOP** = `0`: stop at once.
 - **PLAY_TO_END** = `1`: let the current sound finish. A scatterer stops spawning and lets the
@@ -118,8 +121,9 @@ What happens when the instrument's condition stops holding, or a timeline jump l
 <a id="property-async_playback"></a>
 ### bool async_playback = `false`
 
-TIMELINE events: once triggered, play to the sound's own end instead of following the playhead
-(not stopped when the playhead leaves, not re-seeked by jumps). An async scatterer stops spawning
+TIMELINE events and PARAMETER sheets: once triggered, play to the sound's own end instead of
+following the playhead or the parameter (not stopped when the playhead or value leaves, not
+re-seeked by jumps). An async scatterer stops spawning
 when the playhead leaves, and lets its sounds finish.
 
 ---
@@ -179,6 +183,24 @@ EVENT: the nested event. An event can't nest itself.
 
 ---
 
+<a id="property-fade_in"></a>
+### float fade_in = `0.0`
+
+PARAMETER sheets: over this much of the parameter's axis from [start](#property-start), the volume
+rises from silence to full. Overlap two instruments and give them matching fades to crossfade.
+
+---
+
+<a id="property-fade_out"></a>
+### float fade_out = `0.0`
+
+PARAMETER sheets: over this much of the axis before the end of the range
+([start](#property-start) + [length](#property-length)), the volume falls to silence. Needs a
+length. An instrument that plays on after leaving its range (`PLAY_TO_END`, async) keeps the
+volume it had.
+
+---
+
 <a id="property-kind"></a>
 ### [Kind](#enum-kind) kind = `SOUND`
 
@@ -190,6 +212,9 @@ What the instrument plays. See [Kind](#enum-kind).
 ### float length = `0.0`
 
 TIMELINE events: how long the instrument stays on the timeline, in the event's timeline units.
+PARAMETER sheets: how far its range reaches on the parameter's axis; `0` = to the end of the
+parameter's range. Ranges include their start and exclude their end, except an end at the
+parameter's maximum.
 `0` = the length of its longest stream (or its duration, for SILENCE); a nested event, scatterer
 or programmer instrument with length `0` never leaves the timeline: it plays until it ends by
 itself. Give scatterers a length on timelines.
@@ -300,6 +325,7 @@ stopped; such an event never ends by itself.
 ### float start = `0.0`
 
 TIMELINE events: where the instrument starts on the timeline, in the event's timeline units.
+PARAMETER sheets: where its range starts on the parameter's axis.
 
 ---
 

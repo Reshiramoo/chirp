@@ -8,6 +8,7 @@ enum SheetMode {
 	SIMULTANEOUS, ## Trigger every instrument when the event starts.
 	CONSECUTIVE, ## Trigger instruments one after another, in list order.
 	TIMELINE, ## Instruments sit on a timeline (their start/length); markers control the playhead.
+	PARAMETER, ## Instruments sit on sheet_parameter's axis (their start/length); each plays while the value is in its range.
 }
 
 enum TimelineUnits {
@@ -33,7 +34,10 @@ enum Stealing {
 }
 
 @export var instruments: Array[ChirpInstrument] = []
-@export var sheet_mode := SheetMode.SIMULTANEOUS
+@export var sheet_mode := SheetMode.SIMULTANEOUS:
+	set(value):
+		sheet_mode = value
+		notify_property_list_changed()
 ## A persistent event keeps playing after its content ends, until stopped.
 @export var persistent := false
 ## "bus:/SFX" or "bus:/SFX/UI" (the last segment names the Godot bus), "bus:/" for Master.
@@ -50,6 +54,10 @@ enum Stealing {
 ## Units for instrument start/length and marker positions on a TIMELINE event.
 @export var timeline_units := TimelineUnits.SECONDS
 @export var markers: Array[ChirpMarker] = []
+
+@export_group("Parameter Sheet")
+## PARAMETER sheets: the local or global parameter whose value places the playhead.
+@export var sheet_parameter := ""
 
 @export_group("Instance Limits")
 ## 0 = unlimited.
@@ -132,6 +140,10 @@ const _GODOT_ATTENUATION := ["max_distance_2d", "attenuation_2d", "unit_size_3d"
 
 func _validate_property(property: Dictionary) -> void:
 	var name: String = property.name
+	if name == "sheet_parameter" and sheet_mode != SheetMode.PARAMETER \
+			or name in ["timeline_units", "markers"] and sheet_mode != SheetMode.TIMELINE:
+		property.usage = PROPERTY_USAGE_NO_EDITOR
+		return
 	if rolloff == Rolloff.GODOT and name in ["min_distance", "max_distance", "rolloff_curve"] \
 			or rolloff != Rolloff.GODOT and name in _GODOT_ATTENUATION \
 			or name == "rolloff_curve" and rolloff != Rolloff.CUSTOM:

@@ -2,7 +2,8 @@
 extends RefCounted
 ## Layout, grid, snapping, hit-testing and drag maths for the timeline editor.
 ## Kept free of drawing and input so it can be tested. Positions are in the event's
-## timeline units (seconds or beats), the same values stored on instruments and markers.
+## timeline units (seconds or beats), the same values stored on instruments and markers;
+## on a PARAMETER sheet they are values of the sheet parameter, and there are no marker lanes.
 
 const Timeline := preload("../runtime/timeline.gd")
 
@@ -25,6 +26,9 @@ var zoom := 60.0
 var scroll := 0.0
 var snap := Snap.BEAT
 var timeline: Timeline
+## PARAMETER sheets: the sheet parameter's definition (set by the dock, which can see globals).
+## Null = a 0..1 range.
+var sheet_definition: ChirpParameter
 
 var header_width := BASE_HEADER_WIDTH
 var ruler_height := BASE_RULER_HEIGHT
@@ -79,7 +83,47 @@ func region_lane_count() -> int:
 
 
 func in_beats() -> bool:
-	return event != null and event.timeline_units == ChirpEvent.TimelineUnits.BEATS
+	return event != null and event.timeline_units == ChirpEvent.TimelineUnits.BEATS and not is_sheet()
+
+
+## True for PARAMETER sheets: the axis is a parameter, not time.
+func is_sheet() -> bool:
+	return event != null and event.sheet_mode == ChirpEvent.SheetMode.PARAMETER
+
+
+## PARAMETER sheets: the sheet parameter's (min, max).
+func sheet_range() -> Vector2:
+	if sheet_definition == null:
+		return Vector2(0.0, 1.0)
+	var lo := sheet_definition.get_min()
+	return Vector2(lo, maxf(sheet_definition.get_max(), lo + EPSILON))
+
+
+## Lowest unit the view can scroll to: 0, or a sheet parameter's minimum.
+func min_unit() -> float:
+	return minf(sheet_range().x, 0.0) if is_sheet() else 0.0
+
+
+## PARAMETER sheets: grid step for [param mode] (BAR = coarse, BEAT = fine), from the range.
+func sheet_step(mode := Snap.BEAT) -> float:
+	var span := sheet_range().y - sheet_range().x
+	var coarse := _nice_step(span / 10.0)
+	if mode == Snap.BAR:
+		return coarse
+	if sheet_definition and sheet_definition.kind != ChirpParameter.Kind.CONTINUOUS:
+		return maxf(coarse / 5.0, 1.0)
+	return coarse / 5.0
+
+
+## 1, 2 or 5 × a power of ten, at least [param raw].
+static func _nice_step(raw: float) -> float:
+	if raw <= 0.0:
+		return 1.0
+	var power := pow(10.0, floorf(log(raw) / log(10.0)))
+	for factor in [1.0, 2.0, 5.0, 10.0]:
+		if factor * power >= raw - EPSILON:
+			return factor * power
+	return 10.0 * power
 
 
 # --- coordinates -------------------------------------------------------------------
@@ -97,11 +141,11 @@ func markers_lane_y() -> float:
 
 
 func regions_lane_y() -> float:
-	return ruler_height + lane_height
+	return ruler_height + (0.0 if is_sheet() else lane_height)
 
 
 func instrument_y(index: int) -> float:
-	return regions_lane_y() + _region_lane_count * lane_height + index * row_height
+	return regions_lane_y() + (0.0 if is_sheet() else _region_lane_count * lane_height) + index * row_height
 
 
 func content_height() -> float:
@@ -112,11 +156,18 @@ func content_height() -> float:
 func zoom_at(factor: float, anchor_x: float) -> void:
 	var anchor := x_to_unit(anchor_x)
 	zoom = clampf(zoom * factor, MIN_ZOOM, MAX_ZOOM)
-	scroll = maxf(anchor - (anchor_x - header_width) / zoom, 0.0)
+	scroll = maxf(anchor - (anchor_x - header_width) / zoom, min_unit())
 
 
-## Shows everything from 0 to the end of the content in [param width] pixels.
+## Shows everything from 0 to the end of the content in [param width] pixels
+## (a sheet parameter's whole range on PARAMETER sheets).
 func fit(width: float) -> void:
+	if is_sheet():
+		var sheet := sheet_range()
+		var margin := (sheet.y - sheet.x) * 0.02
+		zoom = clampf((width - header_width) / (sheet.y - sheet.x + margin * 2.0), 0.0001, MAX_ZOOM)
+		scroll = sheet.x - margin
+		return
 	var end := maxf(content_end(), 1.0) * 1.1 # a little room after the last item
 	zoom = clampf((width - header_width) / end, MIN_ZOOM, MAX_ZOOM)
 	scroll = 0.0
@@ -159,10 +210,26 @@ func tempo_segments() -> Array[Dictionary]:
 	return segments
 
 
-## Grid lines in [from, to]: [{position, bar, beat}]; beat 1 is a bar line.
+## Grid lines in [from, to]: [{position, bar, beat, label}]; beat 1 is a bar line (a coarse step on
+## PARAMETER sheets) and label is the text to show for it.
 ## Beats are left out when they would be closer than [param min_spacing] pixels.
 func grid_lines(from: float, to: float, min_spacing := 6.0) -> Array[Dictionary]:
 	var lines: Array[Dictionary] = []
+	if is_sheet():
+		var coarse := sheet_step(Snap.BAR)
+		var fine := sheet_step(Snap.BEAT)
+		var fine_visible := fine * zoom >= min_spacing
+		var sheet := sheet_range()
+		var per_coarse := maxi(roundi(coarse / fine), 1)
+		var k := int(ceilf(maxf(from, sheet.x) / fine - EPSILON)) # grid aligned to multiples of the step
+		var position := k * fine
+		while position <= minf(to, sheet.y) + EPSILON and lines.size() < 4000:
+			var major := posmod(k, per_coarse) == 0
+			if major or fine_visible:
+				lines.append({position = position, bar = 0, beat = 1 if major else 2, label = _number(position)})
+			k += 1
+			position = k * fine
+		return lines
 	var segments := tempo_segments()
 	for i in segments.size():
 		var segment := segments[i]
@@ -175,14 +242,17 @@ func grid_lines(from: float, to: float, min_spacing := 6.0) -> Array[Dictionary]
 		while position <= to + EPSILON and position < segment_end - EPSILON and lines.size() < 4000:
 			var beat: int = k % segment.beats_per_bar + 1
 			if beat == 1 or not beats_only_bars:
-				lines.append({position = position, bar = k / segment.beats_per_bar + 1, beat = beat})
+				var bar: int = k / segment.beats_per_bar + 1
+				lines.append({position = position, bar = bar, beat = beat, label = str(bar)})
 			k += 1
 			position = segment.start + k * segment.beat
 	return lines
 
 
-## Length of one bar, in units, at [param unit].
+## Length of one bar, in units, at [param unit] (a coarse grid step on PARAMETER sheets).
 func bar_length_at(unit: float) -> float:
+	if is_sheet():
+		return sheet_step(Snap.BAR)
 	var length := 0.0
 	for segment in tempo_segments():
 		if segment.start <= unit + EPSILON or length == 0.0:
@@ -192,6 +262,15 @@ func bar_length_at(unit: float) -> float:
 
 ## Nearest beat or bar line to [param unit] (or [param unit] itself when snapping is off).
 func snap_unit(unit: float, mode := snap) -> float:
+	if is_sheet():
+		var sheet := sheet_range()
+		if mode != Snap.OFF:
+			var grid := snappedf(unit, sheet_step(mode))
+			for edge in [sheet.x, sheet.y]: # the range ends snap too
+				if absf(unit - edge) < absf(unit - grid):
+					grid = edge
+			unit = grid
+		return clampf(unit, sheet.x, sheet.y)
 	if mode == Snap.OFF:
 		return maxf(unit, 0.0)
 	var segments := tempo_segments()
@@ -221,6 +300,8 @@ func instrument_span(instrument: ChirpInstrument) -> Vector2:
 	var start := instrument.start
 	if instrument.length > 0.0:
 		return Vector2(start, start + instrument.length)
+	if is_sheet():
+		return Vector2(start, maxf(sheet_range().y, start)) # length 0 runs to the end of the range
 	var seconds := instrument.get_length()
 	if seconds <= 0.0 or timeline == null:
 		return Vector2(start, INF)
@@ -333,6 +414,8 @@ func drag_values(resource: Resource, part: String, origin: Dictionary, delta: fl
 
 ## The smallest length an item can be resized to near [param unit]: one grid step when snapping.
 func _min_length(unit: float) -> float:
+	if is_sheet():
+		return sheet_step(Snap.BEAT) if snap != Snap.OFF else (sheet_range().y - sheet_range().x) / 1000.0
 	if snap == Snap.OFF:
 		return 0.01
 	var length := 0.01
@@ -340,6 +423,14 @@ func _min_length(unit: float) -> float:
 		if segment.start <= unit:
 			length = segment.beat
 	return length
+
+
+## A grid value as short text: no trailing zeros.
+static func _number(value: float) -> String:
+	value = snappedf(value, 0.0001)
+	if is_equal_approx(value, roundf(value)):
+		return str(roundi(value))
+	return String.num(value, 4)
 
 
 ## Display name for an instrument block.

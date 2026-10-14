@@ -1,6 +1,6 @@
 @tool
 extends Control
-## Draws a TIMELINE ChirpEvent and edits it with the mouse. Drags are applied live and
+## Draws a TIMELINE or PARAMETER-sheet ChirpEvent and edits it with the mouse. Drags are applied live and
 ## reported through drag_finished so the dock can record one undo action per drag.
 ##
 ## Mouse: drag blocks/markers to move, drag their edges to resize (Shift: no snapping),
@@ -35,8 +35,8 @@ const PLAYHEAD_COLOR := Color(1.0, 0.3, 0.3)
 
 var model := TimelineModel.new()
 var selected: Resource
-## Playhead in timeline units; negative hides it.
-var playhead := -1.0
+## Playhead in timeline units (the sheet parameter's value on PARAMETER sheets); NAN hides it.
+var playhead := NAN
 ## Shown when there is nothing to draw.
 var empty_message := "Select a ChirpEvent whose sheet mode is Timeline."
 
@@ -67,7 +67,8 @@ func _draw() -> void:
 
 	# Lane backgrounds
 	draw_rect(Rect2(0, 0, size.x, model.ruler_height), Color(0, 0, 0, 0.25))
-	draw_rect(Rect2(0, model.regions_lane_y(), size.x, model.lane_height * model.region_lane_count()), Color(1, 1, 1, 0.02))
+	if not model.is_sheet():
+		draw_rect(Rect2(0, model.regions_lane_y(), size.x, model.lane_height * model.region_lane_count()), Color(1, 1, 1, 0.02))
 	for i in event.instruments.size():
 		if i % 2 == 1:
 			draw_rect(Rect2(0, model.instrument_y(i), size.x, model.row_height), Color(1, 1, 1, 0.02))
@@ -79,12 +80,22 @@ func _draw() -> void:
 		draw_line(Vector2(x, model.ruler_height), Vector2(x, size.y), Color(1, 1, 1, 0.13 if bar else 0.05))
 		draw_line(Vector2(x, model.ruler_height - (10 if bar else 5)), Vector2(x, model.ruler_height), Color(1, 1, 1, 0.5 if bar else 0.25))
 		if bar:
-			draw_string(font, Vector2(x + 3, model.ruler_height - 8), str(line.bar), HORIZONTAL_ALIGNMENT_LEFT, -1, small, text_color.darkened(0.2))
+			draw_string(font, Vector2(x + 3, model.ruler_height - 8), line.label, HORIZONTAL_ALIGNMENT_LEFT, -1, small, text_color.darkened(0.2))
 	for y in [model.ruler_height, model.regions_lane_y(), instruments_top]:
 		draw_line(Vector2(0, y), Vector2(size.x, y), Color(1, 1, 1, 0.08))
 
+	if model.is_sheet():
+		var sheet := model.sheet_range()
+		for edge in [sheet.x, sheet.y]: # the parameter's range
+			var x := model.unit_to_x(edge)
+			draw_line(Vector2(x, 0), Vector2(x, size.y), Color(1, 1, 1, 0.3), 1.0)
+
+	var markers: Array[ChirpMarker] = []
+	if not model.is_sheet():
+		markers = event.markers
+
 	# Regions
-	for marker in event.markers:
+	for marker in markers:
 		if marker == null or not marker.is_region():
 			continue
 		var color: Color = MARKER_COLORS[marker.kind]
@@ -100,7 +111,7 @@ func _draw() -> void:
 		_draw_clipped_text(font, small, label, rect.grow_individual(-4, 0, 0, 0), color.lightened(0.4))
 
 	# Point markers
-	for marker in event.markers:
+	for marker in markers:
 		if marker == null or marker.is_region():
 			continue
 		var color: Color = MARKER_COLORS[marker.kind]
@@ -130,6 +141,8 @@ func _draw() -> void:
 		draw_rect(Rect2(rect.position, Vector2(3, rect.size.y)), color)
 		if instrument.length <= 0.0 and span.y != INF:
 			draw_dashed_line(Vector2(x1, rect.position.y), Vector2(x1, rect.end.y), color, 1.0, 3.0)
+		if model.is_sheet():
+			_draw_fades(instrument, rect, color)
 		if instrument == selected:
 			draw_rect(rect, Color.WHITE, false, 2.0)
 		var label := TimelineModel.instrument_label(instrument)
@@ -145,7 +158,7 @@ func _draw() -> void:
 		_draw_clipped_text(font, small, label, rect.grow_individual(-8, 0, 0, 0), text_color)
 
 	# Playhead
-	if playhead >= 0.0:
+	if not is_nan(playhead):
 		var x := model.unit_to_x(playhead)
 		if x >= left:
 			draw_line(Vector2(x, 0), Vector2(x, size.y), PLAYHEAD_COLOR, 2.0)
@@ -156,9 +169,13 @@ func _draw() -> void:
 	draw_line(Vector2(left, 0), Vector2(left, size.y), Color(1, 1, 1, 0.12))
 	var header := func(text: String, y: float, height: float, color: Color) -> void:
 		_draw_header_text(font, small, text, Rect2(8, y, left - 12, height), color)
-	header.call("Bars (%s)" % ("beats" if model.in_beats() else "seconds"), 0, model.ruler_height, text_color.darkened(0.35))
-	header.call("Markers", model.markers_lane_y(), model.lane_height, text_color.darkened(0.2))
-	header.call("Regions", model.regions_lane_y(), model.lane_height, text_color.darkened(0.2))
+	if model.is_sheet():
+		var parameter_name := event.sheet_parameter if event.sheet_parameter else "(no sheet parameter)"
+		header.call(parameter_name, 0, model.ruler_height, text_color.darkened(0.35))
+	else:
+		header.call("Bars (%s)" % ("beats" if model.in_beats() else "seconds"), 0, model.ruler_height, text_color.darkened(0.35))
+		header.call("Markers", model.markers_lane_y(), model.lane_height, text_color.darkened(0.2))
+		header.call("Regions", model.regions_lane_y(), model.lane_height, text_color.darkened(0.2))
 	for i in event.instruments.size():
 		var instrument := event.instruments[i]
 		var label := "%d  %s" % [i + 1, TimelineModel.instrument_label(instrument) if instrument else "(empty)"]
@@ -176,7 +193,7 @@ func _gui_input(input: InputEvent) -> void:
 	elif input is InputEventMouseMotion:
 		_on_mouse_motion(input)
 	elif input is InputEventPanGesture:
-		model.scroll = maxf(model.scroll + input.delta.x * 20.0 / model.zoom, 0.0)
+		model.scroll = maxf(model.scroll + input.delta.x * 20.0 / model.zoom, model.min_unit())
 		accept_event()
 		queue_redraw()
 	elif input is InputEventMagnifyGesture:
@@ -203,7 +220,7 @@ func _on_mouse_button(button: InputEventMouseButton) -> void:
 			if zoom_modifier:
 				model.zoom_at(1.15 if up else 1.0 / 1.15, button.position.x)
 			elif button.shift_pressed:
-				model.scroll = maxf(model.scroll + (-40.0 if up else 40.0) / model.zoom, 0.0)
+				model.scroll = maxf(model.scroll + (-40.0 if up else 40.0) / model.zoom, model.min_unit())
 			else:
 				return # let the scroll container scroll rows
 			accept_event()
@@ -219,7 +236,7 @@ func _on_mouse_button(button: InputEventMouseButton) -> void:
 				match hit.area:
 					"ruler":
 						var unit: float = hit.unit if button.shift_pressed else model.snap_unit(hit.unit)
-						seek_requested.emit(maxf(unit, 0.0))
+						seek_requested.emit(maxf(unit, model.min_unit()))
 					"instrument", "marker":
 						var resource := model.hit_resource(hit)
 						_select(resource)
@@ -243,7 +260,7 @@ func _on_mouse_button(button: InputEventMouseButton) -> void:
 
 func _on_mouse_motion(motion: InputEventMouseMotion) -> void:
 	if _panning:
-		model.scroll = maxf(model.scroll - motion.relative.x / model.zoom, 0.0)
+		model.scroll = maxf(model.scroll - motion.relative.x / model.zoom, model.min_unit())
 		queue_redraw()
 	elif not _drag.is_empty():
 		var delta := model.x_to_unit(motion.position.x) - float(_drag.start_unit)
@@ -267,6 +284,21 @@ func _apply(resource: Resource, values: Dictionary) -> void:
 	for property: String in values:
 		resource.set(property, values[property])
 	queue_redraw()
+
+
+## PARAMETER sheets: fade-in / fade-out ramps over an instrument block.
+func _draw_fades(instrument: ChirpInstrument, rect: Rect2, color: Color) -> void:
+	var shade := Color(0, 0, 0, 0.35)
+	if instrument.fade_in > 0.0:
+		var x := minf(rect.position.x + instrument.fade_in * model.zoom, rect.end.x)
+		draw_colored_polygon(PackedVector2Array([rect.position, Vector2(x, rect.position.y),
+			Vector2(rect.position.x, rect.end.y)]), shade)
+		draw_line(Vector2(rect.position.x, rect.end.y), Vector2(x, rect.position.y), color.lightened(0.3), 1.5)
+	if instrument.fade_out > 0.0 and instrument.length > 0.0:
+		var x := maxf(rect.end.x - instrument.fade_out * model.zoom, rect.position.x)
+		draw_colored_polygon(PackedVector2Array([Vector2(x, rect.position.y), Vector2(rect.end.x, rect.position.y),
+			rect.end]), shade)
+		draw_line(Vector2(x, rect.position.y), rect.end, color.lightened(0.3), 1.5)
 
 
 func _marker_label(marker: ChirpMarker) -> String:

@@ -54,13 +54,20 @@ enum CutBehavior {
 ## Furthest a scattered sound is placed from the event.
 @export_range(0.0, 1000.0, 0.01, "or_greater") var scatter_distance_max := 0.0
 
-@export_group("Timeline")
-## Where the instrument starts on a TIMELINE event, in the event's timeline units.
+@export_group("Timeline & Parameter Sheet")
+## Where the instrument starts: on a TIMELINE event in its timeline units, on a PARAMETER sheet
+## in parameter units.
 @export var start := 0.0
-## How long it stays on the timeline. 0 = the length of its longest stream.
+## How far it reaches. TIMELINE: 0 = the length of its longest stream.
+## PARAMETER: 0 = to the end of the parameter's range.
 @export var length := 0.0
-## Plays to its own end once triggered, instead of following the timeline playhead.
+## Plays to its own end once triggered, instead of following the timeline playhead or the
+## parameter leaving its range.
 @export var async_playback := false
+## PARAMETER sheets: parameter distance over which the volume rises from silence after start.
+@export_range(0.0, 100.0, 0.001, "or_greater") var fade_in := 0.0
+## PARAMETER sheets: parameter distance over which the volume falls to silence before the end.
+@export_range(0.0, 100.0, 0.001, "or_greater") var fade_out := 0.0
 
 @export_group("Randomization")
 ## Each trigger is quieter by a random amount up to this.

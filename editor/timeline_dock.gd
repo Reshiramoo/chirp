@@ -1,8 +1,9 @@
 @tool
 extends EditorDock
-## Bottom dock with a visual editor for TIMELINE events: instruments as blocks, markers as
-## flags and regions, a beat/bar grid from the tempo markers, and the preview playhead.
-## Every edit goes through the editor's undo/redo.
+## Bottom dock with a visual editor for TIMELINE events (instruments as blocks, markers as
+## flags and regions, a beat/bar grid from the tempo markers, the preview playhead) and
+## PARAMETER sheets (instruments along the sheet parameter's range, with their fades; the
+## preview's parameter value as the playhead). Every edit goes through the editor's undo/redo.
 
 const TimelineView := preload("timeline_view.gd")
 const TimelineModel := preload("timeline_model.gd")
@@ -22,6 +23,7 @@ var _context := PopupMenu.new()
 var _context_unit := 0.0
 var _context_resource: Resource
 var _needs_fit := false
+var _shown_mode := -1 # sheet mode the view was set up for; switching it re-runs edit()
 
 
 func setup(plugin: EditorPlugin, preview_dock: Node) -> void:
@@ -38,7 +40,7 @@ func setup(plugin: EditorPlugin, preview_dock: Node) -> void:
 	var toolbar := HBoxContainer.new()
 	box.add_child(toolbar)
 	_title = Label.new()
-	_title.text = "No timeline event selected"
+	_title.text = "No timeline or parameter sheet event selected"
 	_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_title.clip_text = true
 	toolbar.add_child(_title)
@@ -50,7 +52,7 @@ func setup(plugin: EditorPlugin, preview_dock: Node) -> void:
 	for option in ["Off", "Beat", "Bar"]:
 		_snap.add_item(option)
 	_snap.select(TimelineModel.Snap.BEAT)
-	_snap.tooltip_text = "Snap moves and resizes to the tempo grid (hold Shift to ignore)"
+	_snap.tooltip_text = "Snap moves and resizes to the grid (hold Shift to ignore)"
 	_snap.item_selected.connect(func(index: int) -> void: _view.model.snap = index)
 	toolbar.add_child(_snap)
 	toolbar.add_child(VSeparator.new())
@@ -66,6 +68,9 @@ func setup(plugin: EditorPlugin, preview_dock: Node) -> void:
 	_add.flat = false
 	_fill_add_menu(_add.get_popup())
 	_add.get_popup().id_pressed.connect(func(id: int) -> void: _on_add(id, _insert_unit()))
+	_add.about_to_popup.connect(func() -> void:
+		_add.get_popup().clear()
+		_fill_add_menu(_add.get_popup()))
 	toolbar.add_child(_add)
 	_tool_button(toolbar, "Save", "Save the event", func() -> void:
 		if _event and not _event.resource_path.is_empty():
@@ -96,32 +101,41 @@ func setup(plugin: EditorPlugin, preview_dock: Node) -> void:
 	add_child(_context)
 
 
-## Shows [param event] in the timeline if its sheet mode is TIMELINE.
+## Shows [param event] if its sheet mode is TIMELINE or PARAMETER.
 func edit(event: ChirpEvent) -> void:
-	if event == _event:
+	if event == _event and _shown_mode == (event.sheet_mode if event else -1):
 		return
 	_event = event
-	var is_timeline := event != null and event.sheet_mode == ChirpEvent.SheetMode.TIMELINE
-	_view.model.event = event if is_timeline else null
+	_shown_mode = event.sheet_mode if event else -1
+	var editable := _is_editable(event)
+	_view.model.event = event if editable else null
 	_view.selected = null
-	_view.empty_message = "Select a ChirpEvent whose sheet mode is Timeline." if event == null \
-		else "%s is not a timeline event: set its sheet mode to Timeline." % _event_name(event)
-	_title.text = _event_name(event) if is_timeline else "No timeline event selected"
-	_add.disabled = not is_timeline
-	_needs_fit = is_timeline
+	_view.empty_message = "Select a ChirpEvent whose sheet mode is Timeline or Parameter." if event == null \
+		else "%s has no timeline: set its sheet mode to Timeline or Parameter." % _event_name(event)
+	var kind := "parameter sheet" if event and event.sheet_mode == ChirpEvent.SheetMode.PARAMETER else "timeline"
+	_title.text = "%s (%s)" % [_event_name(event), kind] if editable else "No timeline or parameter sheet event selected"
+	_add.disabled = not editable
+	var sheet := _view.model.is_sheet()
+	for option in 3:
+		_snap.set_item_text(option, ["Off", "Fine", "Coarse"][option] if sheet else ["Off", "Beat", "Bar"][option])
+	_needs_fit = editable
 	_view.queue_redraw()
+
+
+static func _is_editable(event: ChirpEvent) -> bool:
+	return event != null and event.sheet_mode in [ChirpEvent.SheetMode.TIMELINE, ChirpEvent.SheetMode.PARAMETER]
 
 
 func _process(_delta: float) -> void:
 	if not is_visible_in_tree():
 		return
 	var model := _view.model
-	if _event and _event.sheet_mode == ChirpEvent.SheetMode.TIMELINE and model.event == null:
-		var current := _event
-		_event = null
-		edit(current) # sheet mode was just switched to TIMELINE
+	if _event and _event.sheet_mode != _shown_mode:
+		edit(_event) # the sheet mode was just switched
 	if model.event == null:
 		return
+	if model.is_sheet():
+		model.sheet_definition = _sheet_definition()
 	model.rebuild()
 	if _needs_fit and _view.size.x > _view.model.header_width:
 		model.fit(_view.size.x)
@@ -129,10 +143,27 @@ func _process(_delta: float) -> void:
 	_view.custom_minimum_size.y = model.content_height()
 	var instance: ChirpEventInstance = _preview_dock._instance
 	if instance and instance.is_playing() and instance.get_event() == model.event:
-		_view.playhead = model.timeline.to_units(instance.get_timeline_position())
+		if model.is_sheet():
+			var state := instance._sheet_state()
+			_view.playhead = state.value if state else NAN
+		else:
+			_view.playhead = model.timeline.to_units(instance.get_timeline_position())
 	else:
-		_view.playhead = -1.0
+		_view.playhead = NAN
 	_view.queue_redraw()
+
+
+## The sheet parameter's definition: the event's own, else the preview Chirp's global one.
+func _sheet_definition() -> ChirpParameter:
+	var local := _event.find_parameter(_event.sheet_parameter)
+	if local:
+		return local
+	var chirp: Node = _preview_dock._chirp
+	if chirp and chirp.config:
+		for definition in chirp.config.global_parameters:
+			if definition and definition.name.nocasecmp_to(_event.sheet_parameter) == 0:
+				return definition
+	return null
 
 
 func _on_item_selected(resource: Resource) -> void:
@@ -167,6 +198,8 @@ func _on_context_requested(screen_position: Vector2, hit: Dictionary) -> void:
 
 func _fill_add_menu(menu: PopupMenu) -> void:
 	menu.add_icon_item(_icon("AudioStreamPlayer"), "Add Instrument", ADD_INSTRUMENT)
+	if _view and _view.model.is_sheet():
+		return # parameter sheets have no markers
 	menu.add_separator("Add Marker")
 	for kind: int in ChirpMarker.Kind.values():
 		menu.add_item(ChirpMarker.Kind.keys()[kind].capitalize(), kind)
@@ -241,13 +274,21 @@ func _seek(unit: float) -> void:
 		_preview_dock.make_visible()
 		_preview_dock.play_item(model.event)
 		instance = _preview_dock._instance
-	if instance:
+	if instance == null:
+		return
+	if model.is_sheet():
+		# Auditions the crossfade: the event's own parameter, else the global one.
+		if model.event.find_parameter(model.event.sheet_parameter):
+			instance.set_parameter(model.event.sheet_parameter, unit)
+		else:
+			_preview_dock._chirp.parameters.set_value(model.event.sheet_parameter, unit)
+	else:
 		instance.set_timeline_position(model.timeline.to_seconds(unit))
 
 
 ## Where toolbar "Add" puts new items: the playhead if previewing, else the left of the view.
 func _insert_unit() -> float:
-	if _view.playhead >= 0.0:
+	if not is_nan(_view.playhead):
 		return _view.playhead
 	return _view.model.scroll
 

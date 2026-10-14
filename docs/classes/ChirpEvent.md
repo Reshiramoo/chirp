@@ -43,6 +43,7 @@ instrument volume × volume [automations](#property-automations) × volume
 | Array[[ChirpLFO](ChirpLFO.md)] | [modulators](#property-modulators) | `[]` |
 | Array[[ChirpParameter](ChirpParameter.md)] | [parameters](#property-parameters) | `[]` |
 | bool | [persistent](#property-persistent) | `false` |
+| String | [sheet_parameter](#property-sheet_parameter) | `""` |
 | float | [pitch_scale](#property-pitch_scale) | `1.0` |
 | [Rolloff](#enum-rolloff) | [rolloff](#property-rolloff) | `GODOT` |
 | Curve | [rolloff_curve](#property-rolloff_curve) | `null` |
@@ -70,6 +71,13 @@ instrument volume × volume [automations](#property-automations) × volume
   previous one finishes; instruments skipped by their probability or condition are passed over.
 - **TIMELINE** = `2`: instruments sit on a timeline (their `start` / `length`); a playhead moves
   along it and [markers](#property-markers) control it.
+- **PARAMETER** = `3`: a parameter sheet. Instruments sit on the axis of
+  [sheet_parameter](#property-sheet_parameter) (their `start` / `length`, in parameter units), and
+  each plays while the parameter's value is inside its range: engine RPM layers, wind strength,
+  footsteps by surface. An instrument triggers when the value enters its range (and again only
+  after leaving and coming back), and stops when it leaves (or plays on, with `PLAY_TO_END` or
+  `async_playback`). Its `fade_in` / `fade_out` crossfade it at the edges of its range. A
+  non-persistent event ends once nothing is playing, e.g. when the value is outside every range.
 
 ---
 
@@ -166,7 +174,7 @@ What the event plays.
 ### Array[[ChirpMarker](ChirpMarker.md)] markers = `[]`
 
 TIMELINE events: markers, tempo markers, loop regions, sustain points, destinations and transitions.
-Ignored by other sheet modes.
+Ignored by other sheet modes, and hidden in the inspector for them.
 
 ---
 
@@ -267,6 +275,15 @@ falls back to LINEAR.
 ### [SheetMode](#enum-sheetmode) sheet_mode = `SIMULTANEOUS`
 
 How the instruments are played. See [SheetMode](#enum-sheetmode).
+
+---
+
+<a id="property-sheet_parameter"></a>
+### String sheet_parameter = `""`
+
+PARAMETER sheets: the parameter whose value places the "playhead": one of the event's own
+parameters, else a global one. Changing it with a `seek_speed` glides through crossfades.
+Unknown names play nothing (with a warning).
 
 ---
 

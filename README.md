@@ -24,6 +24,7 @@ No native libraries, so it runs anywhere Godot does (desktop, Android, iOS, web)
 - [Instances and their lifecycle](#instances-and-their-lifecycle)
 - [Parameters](#parameters)
 - [Timelines and interactive music](#timelines-and-interactive-music)
+- [Parameter sheets](#parameter-sheets)
 - [Listeners and roll-off](#listeners-and-roll-off)
 - [Mixing](#mixing)
 - [Emitter nodes](#emitter-nodes)
@@ -105,7 +106,7 @@ A ChirpEvent is a list of [ChirpInstrument](docs/classes/ChirpInstrument.md)s pl
 | ChirpEvent property | Meaning |
 |---|---|
 | `instruments` | What plays. A `SOUND` instrument has one stream (single sound) or several (playlist: shuffle / random / sequential); `EVENT` nests another event; `SILENCE` waits; `SCATTERER` plays sounds at random intervals and positions; `PROGRAMMER` plays a sound game code supplies. Per-instrument volume, pitch, random volume/pitch, delay, probability, a parameter condition and a cut behaviour. |
-| `sheet_mode` | `SIMULTANEOUS` triggers all instruments; `CONSECUTIVE` plays them one after another; `TIMELINE` places them on a timeline. |
+| `sheet_mode` | `SIMULTANEOUS` triggers all instruments; `CONSECUTIVE` plays them one after another; `TIMELINE` places them on a timeline; `PARAMETER` places them along a parameter. |
 | `persistent` | Keep playing after the content ends, until stopped. |
 | `bus` | Bus path; empty = its sound directory's bus. |
 | `parameters` | Local [ChirpParameter](docs/classes/ChirpParameter.md)s: continuous, discrete or labeled, with optional seek speed. Or built-in. |
@@ -254,6 +255,30 @@ sample. For seamless loops, import the music with looping on and make the loop r
 length: when the playhead jumps, voices already at the right spot keep playing instead of
 restarting (anything more than 50 ms off is re-seeked).
 
+## Parameter sheets
+
+With `sheet_mode = PARAMETER`, instruments sit along a parameter instead of a timeline: name it in
+`sheet_parameter` (the event's own, else a global one), and give each instrument a `start` and
+`length` in that parameter's units (`length` 0 = to the end of its range). Each instrument plays
+while the value is inside its range; `fade_in` and `fade_out` crossfade it at the edges.
+
+A car engine, with an `RPM` parameter from 0 to 6000 and looping layers:
+
+| Instrument | start | length | fade_in | fade_out |
+|---|---|---|---|---|
+| `idle.ogg` | 0 | 1500 | 0 | 500 |
+| `low.ogg` | 1000 | 2500 | 500 | 500 |
+| `high.ogg` | 3000 | 0 | 500 | 0 |
+
+```gdscript
+engine.set_parameter("RPM", rpm)   # give RPM a seek_speed to glide smoothly between layers
+```
+
+An instrument triggers when the value enters its range and stops when it leaves (or plays on with
+`PLAY_TO_END` / `async_playback`), so one-shot instruments work too, e.g. a different landing
+sound per surface. The **Chirp Timeline** dock edits parameter sheets as well, with the fades drawn
+on each block; clicking its ruler sets the parameter in the preview, so you can hear the crossfades.
+
 ## Listeners and roll-off
 
 Chirp measures distance and direction from a listener: the current
@@ -359,7 +384,7 @@ changes the project's buses only while something is playing, and puts them back 
 |---|---|---|
 | **Chirp** | Right dock | Every event from your sound directories (plain audio files dimmed), plus snapshots, VCAs and global parameters. Filter, select to inspect, double-click to play, drag onto resource slots. **Create Emitter** adds a ChirpEmitter2D/3D for the selected event under the selected node. |
 | **Chirp Preview** | Bottom dock | Play / Stop / Stop Now / Key Off for the selected event or snapshot, sliders for its parameters and the global ones, and a live readout of state, voices, playhead, beats and markers. |
-| **Chirp Timeline** | Bottom dock | A visual editor for TIMELINE events: instruments as blocks, markers as flags, regions in stacked rows, a bar/beat grid from the tempo markers, and the preview playhead. Drag to move, drag edges to resize (snapping to beat or bar, Shift to ignore), right-click to add or delete, Delete key removes, Ctrl/Cmd+wheel zooms, Shift+wheel scrolls, click the ruler to seek. Everything is undoable. |
+| **Chirp Timeline** | Bottom dock | A visual editor for TIMELINE events and PARAMETER sheets (instruments along the parameter's range, fades drawn, ruler sets the parameter). For timelines: instruments as blocks, markers as flags, regions in stacked rows, a bar/beat grid from the tempo markers, and the preview playhead. Drag to move, drag edges to resize (snapping to beat or bar, Shift to ignore), right-click to add or delete, Delete key removes, Ctrl/Cmd+wheel zooms, Shift+wheel scrolls, click the ruler to seek. Everything is undoable. |
 | **Inspector** | | A **Preview** button on events and snapshots; a searchable picker for emitters' `event_path`. |
 | **Gizmos** | 2D / 3D viewports | Max distance circle (2D) or unit size and max distance spheres (3D) on emitters, with drag handles when `override_attenuation` is on; dimmed event values otherwise. |
 

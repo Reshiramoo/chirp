@@ -68,8 +68,8 @@ var _sustain: Timeline.Mark # the sustain point holding the playhead, if any
 var _released_sustains := {} # Mark -> true: let past for the rest of this pass
 var _jump := {} # pending (quantized) transition: {time, target: Mark}
 var _jumped := false # the playhead jumped this frame
-var _entry_voices := {} # timeline entry index -> Voice
-var _entry_done := {} # timeline entry index -> true once triggered for this pass
+var _entry_voices := {} # timeline / parameter sheet instrument index -> Voice
+var _entry_done := {} # instrument index -> true once triggered (until it leaves its range)
 
 
 class Voice:
@@ -85,6 +85,7 @@ class Voice:
 	var instrument: ChirpInstrument
 	var entry := -1 # timeline entry index, -1 when not following the timeline
 	var detached := false # left to play to its end, no longer controlled
+	var fade := 1.0 # PARAMETER sheets: crossfade gain, kept at its last value once detached
 
 
 ## One sound started by a SCATTERER voice.
@@ -154,6 +155,9 @@ func start() -> void:
 			_reset_timeline_pass()
 			_emit_timeline_events(-Timeline.EPSILON, 0.0)
 			_sync_entries()
+		ChirpEvent.SheetMode.PARAMETER:
+			_entry_done.clear()
+			_sync_sheet()
 		_:
 			for instrument in _event.instruments:
 				if instrument:
@@ -319,6 +323,8 @@ func _process(delta: float) -> void:
 	if _timeline:
 		_advance_timeline(delta)
 		_sync_entries()
+	elif _event.sheet_mode == ChirpEvent.SheetMode.PARAMETER:
+		_sync_sheet()
 	for voice in _voices.duplicate():
 		if not _voices.has(voice):
 			continue # removed by an earlier voice this frame
@@ -549,6 +555,75 @@ func _resync(voice: Voice, expected: float) -> void:
 		voice.child.set_timeline_position(expected)
 	elif voice.instrument.kind == ChirpInstrument.Kind.SILENCE:
 		voice.silence_left = voice.instrument.duration - expected
+
+
+# --- parameter sheet -----------------------------------------------------------------
+
+## Starts and stops instruments so they match the sheet parameter's value.
+func _sync_sheet() -> void:
+	var state := _sheet_state()
+	for i in _event.instruments.size():
+		var instrument := _event.instruments[i]
+		if instrument == null:
+			continue
+		var inside := state != null and _sheet_inside(instrument, state)
+		var holds := _instrument_condition(instrument)
+		var voice: Voice = _entry_voices.get(i)
+		if voice:
+			if not inside:
+				if instrument.async_playback or instrument.cut_behavior == ChirpInstrument.CutBehavior.PLAY_TO_END:
+					_detach(voice)
+				else:
+					_stop_voice(voice)
+			elif not holds:
+				_cut(voice)
+			if _entry_voices.has(i):
+				continue
+		if not inside:
+			_entry_done.erase(i)
+		elif holds and _state == State.PLAYING and not _entry_done.has(i):
+			_entry_done[i] = true
+			if randf() * 100.0 < instrument.probability:
+				var started_voice := _trigger(instrument)
+				if started_voice:
+					started_voice.entry = i
+					_entry_voices[i] = started_voice
+					_apply(started_voice, _automation(ChirpAutomation.Target.VOLUME),
+						_automation(ChirpAutomation.Target.PITCH))
+
+
+## The sheet parameter's live state (local first, then global), or null with a warning.
+func _sheet_state() -> ChirpParameter.State:
+	var parameter_name := _event.sheet_parameter
+	var state: ChirpParameter.State = _params.get(parameter_name.to_lower())
+	if state == null:
+		state = _chirp.parameters._get_state(parameter_name)
+	if state == null:
+		_chirp._warn_once("sheet:%s:%s" % [_event.resource_path, parameter_name],
+			"Chirp: parameter sheet uses unknown parameter '%s'." % parameter_name)
+	return state
+
+
+## [start, end) on the parameter's axis; a range reaching the parameter's maximum includes it.
+func _sheet_inside(instrument: ChirpInstrument, state: ChirpParameter.State) -> bool:
+	var top := state.def.get_max()
+	var end := instrument.start + instrument.length if instrument.length > 0.0 else INF
+	if state.value < instrument.start - Timeline.EPSILON:
+		return false
+	return state.value < end - Timeline.EPSILON or end >= top - Timeline.EPSILON and state.value <= end + Timeline.EPSILON
+
+
+## Crossfade gain from the instrument's fade_in / fade_out at the sheet parameter's value.
+func _sheet_fade(instrument: ChirpInstrument) -> float:
+	var state := _sheet_state()
+	if state == null:
+		return 1.0
+	var fade := 1.0
+	if instrument.fade_in > 0.0:
+		fade *= clampf((state.value - instrument.start) / instrument.fade_in, 0.0, 1.0)
+	if instrument.fade_out > 0.0 and instrument.length > 0.0:
+		fade *= clampf((instrument.start + instrument.length - state.value) / instrument.fade_out, 0.0, 1.0)
+	return fade
 
 
 # --- conditions ----------------------------------------------------------------------
@@ -835,6 +910,10 @@ func _clear_voices() -> void:
 
 func _apply(voice: Voice, volume_factor: float, pitch_factor: float) -> void:
 	var gain := _get_level() * voice.gain * volume_factor
+	if _event.sheet_mode == ChirpEvent.SheetMode.PARAMETER:
+		if voice.entry >= 0:
+			voice.fade = _sheet_fade(voice.instrument)
+		gain *= voice.fade
 	var final_pitch := maxf(_event.pitch_scale * pitch * voice.pitch * pitch_factor, 0.01)
 	if voice.player:
 		_apply_player(voice.player, gain, final_pitch, null)
@@ -1025,6 +1104,7 @@ func _finish_stop() -> void:
 	_pending.clear()
 	if _timeline:
 		_reset_timeline_pass()
+	_entry_done.clear()
 	_state = State.STOPPED
 	_chirp.events._register_stop(self)
 	stopped.emit()
