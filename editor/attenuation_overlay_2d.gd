@@ -1,10 +1,12 @@
 @tool
 extends RefCounted
-## Draws a selected ChirpEmitter2D's max distance over the 2D editor viewport, with a
-## handle to drag it when override_attenuation is on (dimmed event value otherwise).
+## Draws a selected ChirpEmitter2D's max distance (and min distance, with a Chirp roll-off) over
+## the 2D editor viewport, with a handle to drag the max when override_attenuation is on (dimmed
+## event values otherwise).
 
 const AttenuationGizmo3D := preload("attenuation_gizmo_3d.gd")
 const COLOR := Color(0.4, 0.72, 1.0)
+const MIN_COLOR := Color(1.0, 0.78, 0.35) # min distance of a Chirp roll-off, as the 3D gizmo's unit size
 const HANDLE_RADIUS := 6.0
 
 var plugin: EditorPlugin
@@ -26,6 +28,10 @@ func draw(overlay: Control) -> void:
 	var radius: float = (transform.basis_xform(Vector2(distances.max_distance, 0))).length()
 	var color := COLOR if emitter.override_attenuation else Color(COLOR, 0.35)
 	overlay.draw_arc(center, radius, 0.0, TAU, 128, color, 2.0 * EditorInterface.get_editor_scale(), true)
+	if distances.get("min_distance", 0.0) > 0.0:
+		var min_radius: float = (transform.basis_xform(Vector2(distances.min_distance, 0))).length()
+		overlay.draw_arc(center, min_radius, 0.0, TAU, 96, Color(MIN_COLOR, color.a),
+			1.5 * EditorInterface.get_editor_scale(), true)
 	if emitter.override_attenuation:
 		overlay.draw_circle(_handle_position(), HANDLE_RADIUS * EditorInterface.get_editor_scale(), COLOR)
 

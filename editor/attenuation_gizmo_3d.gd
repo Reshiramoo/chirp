@@ -82,18 +82,25 @@ func _commit_handle(gizmo: EditorNode3DGizmo, handle_id: int, _secondary: bool, 
 
 
 ## The attenuation an emitter will use: its override, or its event's values.
-## {unit_size, max_distance} for 3D, {max_distance} for 2D; empty when unknown.
+## {unit_size, max_distance} for 3D, {max_distance} for 2D (plus min_distance with a Chirp
+## roll-off, where 3D's unit_size is the min distance); empty when unknown.
 static func attenuation(emitter: Node, preview_chirp: Node) -> Dictionary:
 	var is_3d := emitter is ChirpEmitter3D
-	if emitter.override_attenuation:
-		return {unit_size = emitter.unit_size, max_distance = emitter.max_distance} if is_3d \
-			else {max_distance = emitter.max_distance}
 	var event: ChirpEvent = emitter.event
 	if event == null and not emitter.event_path.is_empty() and preview_chirp \
 			and emitter.event_path in preview_chirp.events.get_event_paths():
 		event = preview_chirp.events.get_event(emitter.event_path)
+	var rolloff := event != null and event.rolloff != ChirpEvent.Rolloff.GODOT
+	if emitter.override_attenuation:
+		if is_3d:
+			return {unit_size = emitter.unit_size, max_distance = emitter.max_distance}
+		return {max_distance = emitter.max_distance, min_distance = event.min_distance} if rolloff \
+			else {max_distance = emitter.max_distance}
 	if event == null:
 		return {}
+	if rolloff:
+		return {unit_size = event.min_distance, max_distance = event.max_distance} if is_3d \
+			else {min_distance = event.min_distance, max_distance = event.max_distance}
 	return {unit_size = event.unit_size_3d, max_distance = event.max_distance_3d} if is_3d \
 		else {max_distance = event.max_distance_2d}
 

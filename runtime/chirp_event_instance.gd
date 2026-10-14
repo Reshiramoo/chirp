@@ -26,6 +26,8 @@ enum Spatial { NONE, SPATIAL_2D, SPATIAL_3D }
 const Timeline := preload("timeline.gd")
 ## How far (seconds) a voice may drift from the playhead after a jump before it is re-seeked.
 const RESYNC_TOLERANCE := 0.05
+## AudioStreamPlayer2D.max_distance while Chirp applies the roll-off (effectively no limit).
+const ROLLOFF_FAR := 1.0e7
 
 ## Linear volume multiplier for this instance.
 var volume := 1.0
@@ -629,13 +631,22 @@ func _new_player(stream: AudioStream) -> Node:
 	match _spatial:
 		Spatial.SPATIAL_2D:
 			var player_2d := AudioStreamPlayer2D.new()
-			player_2d.max_distance = _attenuation.get("max_distance", _event.max_distance_2d)
-			player_2d.attenuation = _attenuation.get("attenuation", _event.attenuation_2d)
+			if _uses_rolloff():
+				# Chirp applies the roll-off itself; keep Godot's attenuation out of the way.
+				player_2d.max_distance = ROLLOFF_FAR
+				player_2d.attenuation = 1.0
+			else:
+				player_2d.max_distance = _attenuation.get("max_distance", _event.max_distance_2d)
+				player_2d.attenuation = _attenuation.get("attenuation", _event.attenuation_2d)
 			player = player_2d
 		Spatial.SPATIAL_3D:
 			var player_3d := AudioStreamPlayer3D.new()
-			player_3d.unit_size = _attenuation.get("unit_size", _event.unit_size_3d)
-			player_3d.max_distance = _attenuation.get("max_distance", _event.max_distance_3d)
+			if _uses_rolloff():
+				player_3d.attenuation_model = AudioStreamPlayer3D.ATTENUATION_DISABLED
+				player_3d.max_distance = 0.0
+			else:
+				player_3d.unit_size = _attenuation.get("unit_size", _event.unit_size_3d)
+				player_3d.max_distance = _attenuation.get("max_distance", _event.max_distance_3d)
 			player = player_3d
 		_:
 			player = AudioStreamPlayer.new()
@@ -837,12 +848,33 @@ func _apply(voice: Voice, volume_factor: float, pitch_factor: float) -> void:
 
 
 func _apply_player(player, gain: float, final_pitch: float, offset: Variant) -> void:
-	player.volume_db = linear_to_db(gain) if gain > 0.00001 else -80.0
-	player.pitch_scale = final_pitch
 	if _position is Vector2 and player is AudioStreamPlayer2D:
 		player.global_position = _position + (offset if offset is Vector2 else Vector2.ZERO)
+		if _uses_rolloff():
+			gain *= _rolloff_at(player.global_position.distance_to(_chirp.events._listener_2d.origin))
 	elif _position is Vector3 and player is AudioStreamPlayer3D:
 		player.global_position = _position + (offset if offset is Vector3 else Vector3.ZERO)
+		if _uses_rolloff():
+			gain *= _rolloff_at(player.global_position.distance_to(_chirp.events._listener_3d.origin))
+	player.volume_db = linear_to_db(gain) if gain > 0.00001 else -80.0
+	player.pitch_scale = final_pitch
+
+
+func _uses_rolloff() -> bool:
+	return _event.rolloff != ChirpEvent.Rolloff.GODOT and _spatial != Spatial.NONE
+
+
+## Min and max distance for Chirp's roll-off: the event's, or an attenuation override's
+## (3D unit_size and max_distance, 2D max_distance).
+func _rolloff_range() -> Vector2:
+	var near: float = _attenuation.get("unit_size", _event.min_distance)
+	var far: float = _attenuation.get("max_distance", 0.0)
+	return Vector2(near, far if far > 0.0 else _event.max_distance)
+
+
+func _rolloff_at(distance: float) -> float:
+	var distances := _rolloff_range()
+	return _event.rolloff_gain(distance, distances.x, distances.y)
 
 
 func _automation(target: ChirpAutomation.Target) -> float:
@@ -938,6 +970,10 @@ func _update_built_ins() -> void:
 		speed_absolute = velocity.length()
 		min_distance = _attenuation.get("unit_size", _event.unit_size_3d)
 		max_distance = _attenuation.get("max_distance", _event.max_distance_3d)
+	if _event.rolloff != ChirpEvent.Rolloff.GODOT:
+		var distances := _rolloff_range()
+		min_distance = distances.x
+		max_distance = distances.y
 	cone = absf(orientation)
 	var normalized := 0.0
 	if max_distance > min_distance:

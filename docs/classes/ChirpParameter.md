@@ -65,15 +65,17 @@ rpm.seek_speed = 4000.0 # glide 4000 RPM per second
 ### enum BuiltIn
 
 Built-in parameters are set every frame from the event's position relative to the listener (the
-current `AudioListener2D/3D`, else the current camera). Game code can't set them. Angles are in
+current [ChirpListener2D](ChirpListener2D.md)/[3D](ChirpListener3D.md), else `AudioListener2D/3D`,
+else the current camera). Game code can't set them. Angles are in
 degrees. They need a positioned instance (see
 [ChirpEventInstance.set_position()](ChirpEventInstance.md#method-set_position)); otherwise they stay
 at their default.
 
 - **NONE** = `0`: a normal parameter, set by game code.
 - **DISTANCE** = `1`: distance to the listener. Set [max_value](#property-max_value) to the distance you care about.
-- **DISTANCE_NORMALIZED** = `2`: 0 at the event's min distance, 1 at its max distance (2D: 0 to
-  `max_distance_2d`; 3D: `unit_size_3d` to `max_distance_3d`). Range 0..1.
+- **DISTANCE_NORMALIZED** = `2`: 0 at the event's min distance, 1 at its max distance (with a Chirp
+  roll-off: `min_distance` to `max_distance`; otherwise 2D: 0 to `max_distance_2d`, 3D:
+  `unit_size_3d` to `max_distance_3d`). Range 0..1.
 - **DIRECTION** = `3`: where the event is around the listener: 0 ahead, 90 right, -90 left, ±180
   behind. In 2D "ahead" is up. Range -180..180.
 - **ELEVATION** = `4`: angle above (+) or below (-) the listener's horizontal plane. Always 0 in 2D.

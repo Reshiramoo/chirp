@@ -15,6 +15,16 @@ enum TimelineUnits {
 	BEATS, ## Beats of the TEMPO markers (120 BPM before the first one).
 }
 
+## How volume falls off with distance from the listener, on spatial events.
+enum Rolloff {
+	GODOT, ## Godot's own attenuation: attenuation_2d / max_distance_2d, unit_size_3d / max_distance_3d.
+	LINEAR, ## Full volume up to min_distance, falling in a straight line to silence at max_distance.
+	LINEAR_SQUARED, ## Like LINEAR, squared: falls faster near the listener, gentler toward max_distance.
+	INVERSE, ## Natural falloff: min_distance / distance. Stops falling at max_distance (never silent).
+	INVERSE_TAPERED, ## INVERSE nearby, tapering to silence at max_distance.
+	CUSTOM, ## rolloff_curve from min_distance (X 0) to max_distance (X 1).
+}
+
 enum Stealing {
 	OLDEST, ## Stop the instance that started first.
 	QUIETEST, ## Stop the instance with the lowest current volume.
@@ -48,6 +58,20 @@ enum Stealing {
 ## Minimum time between starts of this event.
 @export_range(0.0, 10.0, 0.01, "or_greater", "suffix:s") var cooldown := 0.0
 
+@export_group("Attenuation")
+## How volume falls off with distance. Anything but GODOT replaces the 2D/3D attenuation settings
+## with min_distance and max_distance, measured from Chirp's listener (see ChirpListener2D/3D).
+@export var rolloff := Rolloff.GODOT:
+	set(value):
+		rolloff = value
+		notify_property_list_changed()
+## Distance up to which the event plays at full volume (pixels in 2D, meters in 3D).
+@export_range(0.0, 1000.0, 0.01, "or_greater") var min_distance := 1.0
+## Distance at which the roll-off ends (silent, except INVERSE).
+@export_range(0.0, 10000.0, 0.01, "or_greater") var max_distance := 20.0
+## CUSTOM: volume (Y, 0..1) from min_distance (X 0) to max_distance (X 1).
+@export var rolloff_curve: Curve
+
 @export_group("Spatial 2D")
 @export var max_distance_2d := 2000.0
 @export_exp_easing("attenuation") var attenuation_2d := 1.0
@@ -74,8 +98,41 @@ func is_one_shot() -> bool:
 	return true
 
 
+## Linear volume at [param distance] for [member rolloff] between [param near] and [param far]
+## (the event's min/max distance unless overridden). 1.0 for GODOT.
+func rolloff_gain(distance: float, near := min_distance, far := max_distance) -> float:
+	far = maxf(far, near)
+	var t := 0.0 if far <= near else clampf((distance - near) / (far - near), 0.0, 1.0)
+	var inverse := 1.0 if distance <= near or near <= 0.0 else near / minf(distance, far)
+	match rolloff:
+		Rolloff.LINEAR:
+			return 1.0 - t
+		Rolloff.LINEAR_SQUARED:
+			return (1.0 - t) * (1.0 - t)
+		Rolloff.INVERSE:
+			return inverse
+		Rolloff.INVERSE_TAPERED:
+			return minf(inverse, (1.0 - t) * (1.0 - t))
+		Rolloff.CUSTOM:
+			if rolloff_curve == null:
+				return 1.0 - t
+			return clampf(rolloff_curve.sample_baked(lerpf(rolloff_curve.min_domain, rolloff_curve.max_domain, t)), 0.0, 1.0)
+	return 1.0
+
+
 func find_parameter(parameter_name: String) -> ChirpParameter:
 	for parameter in parameters:
 		if parameter and parameter.name.nocasecmp_to(parameter_name) == 0:
 			return parameter
 	return null
+
+
+const _GODOT_ATTENUATION := ["max_distance_2d", "attenuation_2d", "unit_size_3d", "max_distance_3d"]
+
+
+func _validate_property(property: Dictionary) -> void:
+	var name: String = property.name
+	if rolloff == Rolloff.GODOT and name in ["min_distance", "max_distance", "rolloff_curve"] \
+			or rolloff != Rolloff.GODOT and name in _GODOT_ATTENUATION \
+			or name == "rolloff_curve" and rolloff != Rolloff.CUSTOM:
+		property.usage = PROPERTY_USAGE_NO_EDITOR

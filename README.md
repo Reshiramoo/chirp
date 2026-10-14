@@ -24,6 +24,7 @@ No native libraries, so it runs anywhere Godot does (desktop, Android, iOS, web)
 - [Instances and their lifecycle](#instances-and-their-lifecycle)
 - [Parameters](#parameters)
 - [Timelines and interactive music](#timelines-and-interactive-music)
+- [Listeners and roll-off](#listeners-and-roll-off)
 - [Mixing](#mixing)
 - [Emitter nodes](#emitter-nodes)
 - [Editor tools](#editor-tools)
@@ -111,6 +112,7 @@ A ChirpEvent is a list of [ChirpInstrument](docs/classes/ChirpInstrument.md)s pl
 | `modulators` | [ChirpLFO](docs/classes/ChirpLFO.md): sine, triangle, square, saw or random waves on volume or pitch. |
 | `envelope` | [ChirpEnvelope](docs/classes/ChirpEnvelope.md) (AHDSR). `release` is the fade-out used by `stop()`. |
 | `max_instances` / `stealing` / `cooldown` | Voice limits: steal oldest, quietest, furthest, or refuse. |
+| `rolloff` / `min_distance` / `max_distance` | Distance roll-off: Godot's, or linear, inverse, tapered or a custom curve (see [Listeners and roll-off](#listeners-and-roll-off)). |
 
 ### Scatterer and programmer instruments
 
@@ -198,8 +200,7 @@ Parameters are named values that drive automation curves and conditions.
 ### Built-in parameters
 
 Set a parameter's `built_in` and Chirp fills it in every frame from the event's position
-relative to the listener (the current `AudioListener2D/3D`, else the current camera; in 2D
-without either, the viewport centre). Automate on it like any other parameter, e.g. muffle a
+relative to the listener (see [Listeners and roll-off](#listeners-and-roll-off)). Automate on it like any other parameter, e.g. muffle a
 sound as it moves away. Built-ins can't be set from code.
 
 | Built-in | Value |
@@ -251,6 +252,29 @@ music.set_timeline_position(12.0)       # seek, in seconds
 sample. For seamless loops, import the music with looping on and make the loop region the same
 length: when the playhead jumps, voices already at the right spot keep playing instead of
 restarting (anything more than 50 ms off is re-seeked).
+
+## Listeners and roll-off
+
+Chirp measures distance and direction from a listener: the current
+[ChirpListener2D](docs/classes/ChirpListener2D.md) / [ChirpListener3D](docs/classes/ChirpListener3D.md),
+else Godot's current `AudioListener2D/3D`, else the current camera (in 2D without one, the screen
+centre). Add a ChirpListener to the camera and point its `attenuation_object` at the player
+character to measure distance from the character while panning follows the camera, as in many
+third-person games. It also drives Godot's audio listener, so panning matches.
+
+By default an event uses Godot's own distance attenuation (`rolloff = GODOT`). Pick another
+`rolloff` on the [ChirpEvent](docs/classes/ChirpEvent.md#enum-rolloff) and Chirp applies it
+between `min_distance` and `max_distance`, the same way in 2D and 3D:
+
+| Roll-off | Volume |
+|---|---|
+| `LINEAR` | Full to `min_distance`, straight line to silence at `max_distance` |
+| `LINEAR_SQUARED` | Same, squared: steeper near, gentler far |
+| `INVERSE` | `min_distance / distance` (natural); stops falling at `max_distance` |
+| `INVERSE_TAPERED` | Inverse nearby, tapering to silence at `max_distance` |
+| `CUSTOM` | Your `Curve`, X from `min_distance` to `max_distance` |
+
+The emitter gizmos show the min and max distances.
 
 ## Mixing
 
@@ -363,6 +387,8 @@ One page per class, in the layout of Godot's class reference.
 |---|---|---|
 | [ChirpEmitter2D](docs/classes/ChirpEmitter2D.md) | Node2D | Plays an event at its position, on triggers. |
 | [ChirpEmitter3D](docs/classes/ChirpEmitter3D.md) | Node3D | Plays an event at its position, on triggers. |
+| [ChirpListener2D](docs/classes/ChirpListener2D.md) | Node2D | Where Chirp measures distance and direction from. |
+| [ChirpListener3D](docs/classes/ChirpListener3D.md) | Node3D | Where Chirp measures distance and direction from. |
 
 ## Limitations
 

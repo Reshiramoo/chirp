@@ -163,6 +163,7 @@ How the instance's players are positioned; set by [set_position()](#method-set_p
 
 ## Constants
 
+- **ROLLOFF_FAR** = `1.0e7`: `AudioStreamPlayer2D.max_distance` while Chirp applies the roll-off.
 - **RESYNC_TOLERANCE** = `0.05`: how far (seconds) a voice may drift from the playhead after a
   timeline jump before it is re-seeked.
 
@@ -274,16 +275,18 @@ instance is freed once neither Chirp nor your code references it, released or no
 <a id="method-set_attenuation_2d"></a>
 ### void set_attenuation_2d(max_distance: float, attenuation: float)
 
-Overrides the event's `max_distance_2d` and `attenuation_2d` for this instance. Applies to players
-started afterwards.
+Overrides the event's `max_distance_2d` and `attenuation_2d` for this instance. With a Chirp
+[roll-off](ChirpEvent.md#property-rolloff), `max_distance` replaces the event's `max_distance`
+instead and `attenuation` is ignored. Applies to players started afterwards.
 
 ---
 
 <a id="method-set_attenuation_3d"></a>
 ### void set_attenuation_3d(unit_size: float, max_distance: float)
 
-Overrides the event's `unit_size_3d` and `max_distance_3d` for this instance. Applies to players
-started afterwards.
+Overrides the event's `unit_size_3d` and `max_distance_3d` for this instance. With a Chirp
+[roll-off](ChirpEvent.md#property-rolloff), they replace `min_distance` and `max_distance` (a
+`max_distance` of 0 keeps the event's). Applies to players started afterwards.
 
 ---
 

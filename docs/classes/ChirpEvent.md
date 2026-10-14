@@ -36,12 +36,16 @@ instrument volume × volume [automations](#property-automations) × volume
 | Array[[ChirpInstrument](ChirpInstrument.md)] | [instruments](#property-instruments) | `[]` |
 | Array[[ChirpMarker](ChirpMarker.md)] | [markers](#property-markers) | `[]` |
 | int | [max_instances](#property-max_instances) | `0` |
+| float | [min_distance](#property-min_distance) | `1.0` |
+| float | [max_distance](#property-max_distance) | `20.0` |
 | float | [max_distance_2d](#property-max_distance_2d) | `2000.0` |
 | float | [max_distance_3d](#property-max_distance_3d) | `0.0` |
 | Array[[ChirpLFO](ChirpLFO.md)] | [modulators](#property-modulators) | `[]` |
 | Array[[ChirpParameter](ChirpParameter.md)] | [parameters](#property-parameters) | `[]` |
 | bool | [persistent](#property-persistent) | `false` |
 | float | [pitch_scale](#property-pitch_scale) | `1.0` |
+| [Rolloff](#enum-rolloff) | [rolloff](#property-rolloff) | `GODOT` |
+| Curve | [rolloff_curve](#property-rolloff_curve) | `null` |
 | [SheetMode](#enum-sheetmode) | [sheet_mode](#property-sheet_mode) | `SIMULTANEOUS` |
 | [Stealing](#enum-stealing) | [stealing](#property-stealing) | `OLDEST` |
 | [TimelineUnits](#enum-timelineunits) | [timeline_units](#property-timeline_units) | `SECONDS` |
@@ -54,6 +58,7 @@ instrument volume × volume [automations](#property-automations) × volume
 |---|---|
 | [ChirpParameter](ChirpParameter.md) | [find_parameter](#method-find_parameter)(parameter_name: String) |
 | bool | [is_one_shot](#method-is_one_shot)() |
+| float | [rolloff_gain](#method-rolloff_gain)(distance: float, near: float = min_distance, far: float = max_distance) |
 
 ## Enumerations
 
@@ -76,6 +81,27 @@ instrument volume × volume [automations](#property-automations) × volume
 
 ---
 
+<a id="enum-rolloff"></a>
+### enum Rolloff
+
+How volume falls off with distance from the listener on spatial events. Every mode but GODOT is
+applied by Chirp, between [min_distance](#property-min_distance) and [max_distance](#property-max_distance),
+measured from Chirp's listener (see [ChirpListener3D](ChirpListener3D.md)); Godot's own distance
+attenuation is switched off for the event's players, while its panning and Doppler still apply.
+
+- **GODOT** = `0`: Godot's attenuation, from [attenuation_2d](#property-attenuation_2d) /
+  [max_distance_2d](#property-max_distance_2d) and [unit_size_3d](#property-unit_size_3d) /
+  [max_distance_3d](#property-max_distance_3d). The default.
+- **LINEAR** = `1`: full volume up to min_distance, falling in a straight line to silence at max_distance.
+- **LINEAR_SQUARED** = `2`: LINEAR squared: falls quickly near the listener, gently toward max_distance.
+- **INVERSE** = `3`: the natural falloff, `min_distance / distance`. It stops falling at
+  max_distance, so the event never goes silent.
+- **INVERSE_TAPERED** = `4`: INVERSE nearby, tapering (as LINEAR_SQUARED) to silence at max_distance.
+- **CUSTOM** = `5`: [rolloff_curve](#property-rolloff_curve), its X axis from min_distance (0) to
+  max_distance (1), Y the volume.
+
+---
+
 <a id="enum-stealing"></a>
 ### enum Stealing
 
@@ -94,6 +120,8 @@ What happens when an instance starts while [max_instances](#property-max_instanc
 
 2D distance attenuation curve (an easing value, as `AudioStreamPlayer2D.attenuation`).
 
+
+Ignored with a [rolloff](#property-rolloff) other than GODOT.
 ---
 
 <a id="property-automations"></a>
@@ -142,12 +170,23 @@ Ignored by other sheet modes.
 
 ---
 
+<a id="property-max_distance"></a>
+### float max_distance = `20.0`
+
+With a [rolloff](#property-rolloff) other than GODOT: where the roll-off ends (silent, except
+INVERSE), in pixels (2D) or meters (3D). Also the far end of the `DISTANCE_NORMALIZED` built-in
+parameter. An emitter's attenuation override replaces it with its `max_distance`.
+
+---
+
 <a id="property-max_distance_2d"></a>
 ### float max_distance_2d = `2000.0`
 
 2D: distance beyond which the event is inaudible. Also the range of the `DISTANCE_NORMALIZED`
 built-in parameter in 2D.
 
+
+Ignored with a [rolloff](#property-rolloff) other than GODOT.
 ---
 
 <a id="property-max_distance_3d"></a>
@@ -156,12 +195,23 @@ built-in parameter in 2D.
 3D: distance beyond which the event is inaudible. `0` = no limit. Also the far end of the
 `DISTANCE_NORMALIZED` built-in parameter in 3D.
 
+
+Ignored with a [rolloff](#property-rolloff) other than GODOT.
 ---
 
 <a id="property-max_instances"></a>
 ### int max_instances = `0`
 
 Maximum instances of this event playing at once. `0` = unlimited. See [stealing](#property-stealing).
+
+---
+
+<a id="property-min_distance"></a>
+### float min_distance = `1.0`
+
+With a [rolloff](#property-rolloff) other than GODOT: the event plays at full volume up to this
+distance. Also the near end of the `DISTANCE_NORMALIZED` built-in parameter. A 3D emitter's
+attenuation override replaces it with its `unit_size`.
 
 ---
 
@@ -196,6 +246,23 @@ Pitch multiplier for the whole event.
 
 ---
 
+<a id="property-rolloff"></a>
+### [Rolloff](#enum-rolloff) rolloff = `GODOT`
+
+How volume falls off with distance. See [Rolloff](#enum-rolloff). The inspector shows the
+settings the chosen mode uses.
+
+---
+
+<a id="property-rolloff_curve"></a>
+### Curve rolloff_curve = `null`
+
+CUSTOM: the volume (Y, 0..1) from [min_distance](#property-min_distance) (X at the curve's min
+domain) to [max_distance](#property-max_distance) (X at its max domain). Without a curve, CUSTOM
+falls back to LINEAR.
+
+---
+
 <a id="property-sheet_mode"></a>
 ### [SheetMode](#enum-sheetmode) sheet_mode = `SIMULTANEOUS`
 
@@ -224,6 +291,8 @@ Units of instrument `start` / `length` and marker positions on a TIMELINE event.
 3D: distance at which the event is at full volume (as `AudioStreamPlayer3D.unit_size`). Also the
 near end of the `DISTANCE_NORMALIZED` built-in parameter in 3D.
 
+
+Ignored with a [rolloff](#property-rolloff) other than GODOT.
 ---
 
 <a id="property-volume_db"></a>
@@ -237,6 +306,14 @@ Volume of the whole event, in dB.
 ### [ChirpParameter](ChirpParameter.md) find_parameter(parameter_name: String)
 
 The local parameter with this name (case-insensitive), or `null`.
+
+---
+
+<a id="method-rolloff_gain"></a>
+### float rolloff_gain(distance: float, near: float = min_distance, far: float = max_distance)
+
+The linear volume at `distance` for the event's [rolloff](#property-rolloff), between `near` and
+`far`. `1.0` for GODOT.
 
 ---
 

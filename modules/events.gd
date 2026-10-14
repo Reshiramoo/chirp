@@ -26,6 +26,7 @@ var _listener_2d_velocity := Vector2.ZERO
 var _listener_3d := Transform3D.IDENTITY
 var _listener_3d_velocity := Vector3.ZERO
 var _listener_ready := false
+var _listener_nodes: Array[Node] = [] # ChirpListener2D/3D that are current, most recent last
 
 ## Supplies sounds for PROGRAMMER instruments that their instance didn't get one for:
 ## [code]func(key: String, instance: ChirpEventInstance) -> AudioStream[/code]. E.g. a lookup of
@@ -154,13 +155,16 @@ func _process(delta: float) -> void:
 		instance._process(delta)
 
 
-## The current AudioListener2D/3D if there is one, else the current camera.
+## The current ChirpListener2D/3D, else the current AudioListener2D/3D, else the current camera.
 func _update_listeners(delta: float) -> void:
 	var viewport: Viewport = _chirp.get_viewport()
 	var listener_2d := Transform2D(0.0, viewport.get_visible_rect().size / 2.0)
 	var audio_listener_2d := viewport.get_audio_listener_2d()
 	var camera_2d := viewport.get_camera_2d()
-	if audio_listener_2d:
+	var chirp_listener_2d: ChirpListener2D = _current_listener(false)
+	if chirp_listener_2d:
+		listener_2d = Transform2D(chirp_listener_2d.global_rotation, chirp_listener_2d.get_attenuation_position())
+	elif audio_listener_2d:
 		listener_2d = audio_listener_2d.global_transform
 	elif camera_2d:
 		var rotation := 0.0 if camera_2d.ignore_rotation else camera_2d.global_rotation
@@ -169,7 +173,11 @@ func _update_listeners(delta: float) -> void:
 	var listener_3d := Transform3D.IDENTITY
 	var audio_listener_3d := viewport.get_audio_listener_3d()
 	var camera_3d := viewport.get_camera_3d()
-	if audio_listener_3d:
+	var chirp_listener_3d: ChirpListener3D = _current_listener(true)
+	if chirp_listener_3d:
+		listener_3d = Transform3D(chirp_listener_3d.global_basis.orthonormalized(),
+			chirp_listener_3d.get_attenuation_position())
+	elif audio_listener_3d:
 		listener_3d = audio_listener_3d.get_listener_transform()
 	elif camera_3d:
 		listener_3d = camera_3d.global_transform
@@ -180,6 +188,27 @@ func _update_listeners(delta: float) -> void:
 	_listener_2d = listener_2d
 	_listener_3d = listener_3d
 	_listener_ready = true
+
+
+func _add_listener(listener: Node) -> void:
+	_listener_nodes.erase(listener)
+	_listener_nodes.append(listener)
+
+
+func _remove_listener(listener: Node) -> void:
+	_listener_nodes.erase(listener)
+
+
+## The most recently made current ChirpListener3D ([param is_3d]) or ChirpListener2D, or null.
+func _current_listener(is_3d: bool) -> Node:
+	for i in range(_listener_nodes.size() - 1, -1, -1):
+		var listener := _listener_nodes[i]
+		if not is_instance_valid(listener) or not listener.is_inside_tree():
+			_listener_nodes.remove_at(i)
+			continue
+		if (is_3d and listener is ChirpListener3D) or (not is_3d and listener is ChirpListener2D):
+			return listener
+	return null
 
 
 func _scan_directory(directory: String, prefix: String, bus: String) -> void:
