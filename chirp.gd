@@ -1,3 +1,4 @@
+@tool
 extends Node
 ## Chirp autoload: the runtime entry point. Each area lives in its own module:
 ##
@@ -26,6 +27,10 @@ var parameters: Parameters
 ## Global parameters, VCAs, snapshots and bus automation, from the "chirp/config" project setting.
 var config: ChirpConfig
 
+## Set by the editor plugin on its own copy used to audition sounds in the editor.
+## The project's Chirp autoload stays idle in the editor.
+var preview := false
+
 var _voice_root: Node
 var _warned := {}
 
@@ -37,10 +42,20 @@ func _init() -> void:
 
 
 func _ready() -> void:
+	if Engine.is_editor_hint() and not preview:
+		set_process(false)
+		return
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_voice_root = Node.new()
 	_voice_root.name = "Voices"
 	add_child(_voice_root)
+	if preview:
+		mixer.set_live(false)
+	reload_settings()
+
+
+## Reloads the "chirp/config" resource and rescans "chirp/sound_directories".
+func reload_settings() -> void:
 	var path: String = ProjectSettings.get_setting(SETTING_CONFIG, DEFAULT_CONFIG)
 	var loaded: ChirpConfig = null
 	if ResourceLoader.exists(path):
@@ -56,11 +71,18 @@ func _process(delta: float) -> void:
 
 
 func _exit_tree() -> void:
+	if Engine.is_editor_hint() and not preview:
+		return
 	# Players still mixing at shutdown keep their playbacks alive and leak.
 	events.stop_all(false)
+	mixer.stop_all_snapshots(false)
+	if preview:
+		mixer.set_live(false)
 
 
 func _notification(what: int) -> void:
+	if Engine.is_editor_hint():
+		return
 	if what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_APPLICATION_RESUMED:
 		if ProjectSettings.get_setting(SETTING_PAUSE_IN_BACKGROUND, true):
 			mixer._background_paused = what == NOTIFICATION_APPLICATION_PAUSED

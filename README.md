@@ -26,6 +26,20 @@ No native libraries, so it runs anywhere Godot does (desktop, Android, iOS, web)
    "res://assets/sounds/sfxs": "bus:/SFX"
    ```
 
+## Editor tools
+
+Enabling the plugin adds three docks and some inspector helpers. Sounds play through a private
+preview copy of Chirp, so nothing leaks into your game. Previewing snapshots or bus automation
+changes the project's buses only while something is playing, and puts them back afterwards.
+
+| Tool | Where | What it does |
+|---|---|---|
+| **Chirp** | Right dock | Every event from your sound directories (plain audio files dimmed), plus snapshots, VCAs and global parameters. Filter, select to inspect, double-click to play, drag onto resource slots. **Create Emitter** adds a ChirpEmitter2D/3D for the selected event under the selected node. |
+| **Chirp Preview** | Bottom dock | Play / Stop / Stop Now / Key Off for the selected event or snapshot, sliders for its parameters and the global ones, and a live readout of state, voices, playhead, beats and markers. |
+| **Chirp Timeline** | Bottom dock | A visual editor for TIMELINE events: instruments as blocks, markers as flags, regions in stacked rows, a bar/beat grid from the tempo markers, and the preview playhead. Drag to move, drag edges to resize (snapping to beat or bar, Shift to ignore), right-click to add or delete, Delete key removes, Ctrl/Cmd+wheel zooms, Shift+wheel scrolls, click the ruler to seek. Everything is undoable. |
+| **Inspector** | | A **Preview** button on events and snapshots; a searchable picker for emitters' `event_path`. |
+| **Gizmos** | 2D / 3D viewports | Max distance circle (2D) or unit size and max distance spheres (3D) on emitters, with drag handles when `override_attenuation` is on; dimmed event values otherwise. |
+
 ## Sounds and events
 
 Every sound in a sound directory gets an event path: the folder's name, then the file path
@@ -184,7 +198,8 @@ Add a **ChirpEmitter2D** or **ChirpEmitter3D**, assign the event, then choose
 The trigger source defaults to the emitter's parent. One-shot events start a new instance
 on every `play()` and `stop()` stops the newest one; looping events restart instead of
 stacking. Looping sounds stop when the emitter is freed; one-shots finish where they were.
-Emitters also offer initial `parameters`, `allow_fadeout`, `trigger_once` and an attenuation override.
+Set `event` to a ChirpEvent, or leave it empty and set `event_path` to any `"event:/..."` path, including plain
+audio files. Emitters also offer initial `parameters`, `allow_fadeout`, `trigger_once` and an attenuation override.
 
 ## Layout
 
@@ -195,10 +210,11 @@ Emitters also offer initial `parameters`, `allow_fadeout`, `trigger_once` and an
 | `resources/` | `ChirpEvent`, `ChirpInstrument`, `ChirpMarker`, `ChirpParameter`, `ChirpAutomation`, `ChirpEnvelope`, `ChirpLFO`, `ChirpVCA`, `ChirpSnapshot`, `ChirpBusOverride`, `ChirpBusAutomation`, `ChirpConfig` |
 | `runtime/` | `ChirpEventInstance`, `ChirpSnapshotInstance`, `timeline.gd` (compiled timelines and tempo maps) |
 | `nodes/` | `ChirpEmitter2D`, `ChirpEmitter3D` |
+| `editor/` | Editor-only: docks, timeline editor, inspector plugin, gizmos |
 
 ## Known limits
 
-- No banks or event editor yet; timelines are set up in the inspector.
+- No banks yet.
 - Timeline timing is frame-accurate, not sample-accurate (see Timelines).
 - Bars and beats count from each `TEMPO` marker; there is no global bar count across tempo changes.
 - `bpm` counts the bar's beats; `beat_unit` is only reported in `timeline_beat`.

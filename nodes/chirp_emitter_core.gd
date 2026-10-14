@@ -42,9 +42,8 @@ func on_exit_tree() -> void:
 
 
 func play() -> void:
-	var event: ChirpEvent = _host.event
+	var event := _resolve_event()
 	if event == null:
-		push_warning("%s: no event assigned." % _host.get_path())
 		return
 	if _host.trigger_once and _played:
 		return
@@ -56,7 +55,7 @@ func play() -> void:
 			if instance.is_playing():
 				instance.start()
 				return
-	var instance: ChirpEventInstance = _host.get_node("/root/Chirp").create_instance(event)
+	var instance: ChirpEventInstance = _chirp().create_instance(event)
 	if instance == null:
 		return
 	instance.attach_to(_host)
@@ -87,6 +86,19 @@ func is_playing() -> bool:
 		if instance.is_playing():
 			return true
 	return false
+
+
+func _chirp() -> Node:
+	return _host.get_node("/root/Chirp")
+
+
+func _resolve_event() -> ChirpEvent:
+	if _host.event:
+		return _host.event
+	if _host.event_path.is_empty():
+		push_warning("%s: no event assigned." % _host.get_path())
+		return null
+	return _chirp().events.get_event(_host.event_path)
 
 
 func _prune() -> void:

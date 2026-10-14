@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 ## Chirp.mixer: bus volumes, VCAs, snapshots, bus automation and pausing.
 ## Bus paths look like "bus:/SFX" or "bus:/SFX/UI"; the last segment names the Godot bus.
@@ -22,6 +23,7 @@ var _effect_switches := {} # "bus|index" -> {bus, index, base}
 var _paused_buses := {} # Godot bus name -> true
 var _all_paused := false
 var _background_paused := false
+var _live := true # false: compute nothing, write nothing (editor preview while idle)
 
 
 func _init(chirp: Node) -> void:
@@ -140,6 +142,24 @@ func mute_all(mute: bool) -> void:
 	AudioServer.set_bus_mute(0, mute)
 
 
+## While not live, the mixer leaves every bus and effect alone. Going live re-reads their
+## current values as the base; going idle restores them. Used by the editor preview so the
+## project's bus layout is only touched while something is being auditioned.
+func set_live(live: bool) -> void:
+	if live == _live:
+		return
+	if live:
+		_live = true
+		_recapture()
+	else:
+		_restore()
+		_live = false
+
+
+func is_live() -> bool:
+	return _live
+
+
 # --- internals ---------------------------------------------------------------------
 
 func _configure(vcas: Array[ChirpVCA], bus_automations: Array[ChirpBusAutomation],
@@ -178,6 +198,8 @@ func _snapshot_stopped(instance: ChirpSnapshotInstance) -> void:
 
 
 func _update() -> void:
+	if not _live:
+		return
 	var active := _snapshot_instances.filter(func(s: ChirpSnapshotInstance) -> bool: return s.get_level() > 0.0)
 	active.sort_custom(func(a: ChirpSnapshotInstance, b: ChirpSnapshotInstance) -> bool:
 		if a._snapshot.priority != b._snapshot.priority:
@@ -258,6 +280,29 @@ func _update_effect_switch(target: Dictionary, active: Array) -> void:
 					and resolve_bus(override.bus) == target.bus:
 				enabled = true
 	AudioServer.set_bus_effect_enabled(index, target.index, enabled)
+
+
+func _recapture() -> void:
+	_managed_buses.clear()
+	_bus_base_db.clear()
+	_effects.clear()
+	_effect_switches.clear()
+	_configure(_vcas.duplicate(), _bus_automations.duplicate(), _snapshots.duplicate())
+
+
+func _restore() -> void:
+	for bus: StringName in _managed_buses:
+		var index := AudioServer.get_bus_index(bus)
+		if index != -1:
+			AudioServer.set_bus_volume_db(index, _bus_base_db[bus])
+	for target: Dictionary in _effects.values():
+		var effect := _get_effect(target.bus, target.index)
+		if effect:
+			effect.set(target.property, target.base)
+	for target: Dictionary in _effect_switches.values():
+		var index := AudioServer.get_bus_index(target.bus)
+		if index != -1 and target.index < AudioServer.get_bus_effect_count(index):
+			AudioServer.set_bus_effect_enabled(index, target.index, target.base)
 
 
 func _manage_bus(bus: StringName) -> void:

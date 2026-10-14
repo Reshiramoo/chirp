@@ -1,3 +1,4 @@
+@tool
 class_name ChirpSnapshotInstance
 extends RefCounted
 ## One active snapshot. Create with Chirp.mixer.start_snapshot().

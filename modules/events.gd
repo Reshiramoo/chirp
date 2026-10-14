@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 ## Chirp.events: finds events by path, creates and plays instances, enforces instance limits.
 ##
@@ -51,6 +52,12 @@ func register_event(event_path: String, event: ChirpEvent) -> void:
 
 func get_event_paths() -> PackedStringArray:
 	return PackedStringArray(_entries.keys())
+
+
+## The file behind an event path (a ChirpEvent resource or an audio file), or "" for code events.
+func get_event_file(event_path: String) -> String:
+	var entry: Variant = _entries.get(event_path)
+	return entry.path if entry else ""
 
 
 ## Accepts a ChirpEvent or an "event:/..." path.

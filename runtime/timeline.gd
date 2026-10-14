@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 ## Compiled form of a TIMELINE event: every position converted to seconds, plus
 ## tempo-map queries. Built once per event instance.
@@ -91,6 +92,23 @@ func to_seconds(position: float) -> float:
 		beat = tempo.position
 		bpm = tempo.bpm
 	return seconds + (position - beat) * 60.0 / bpm
+
+
+## Converts seconds back to the event's timeline units.
+func to_units(seconds: float) -> float:
+	if not _in_beats:
+		return seconds
+	var elapsed := 0.0
+	var beat := 0.0
+	var bpm := DEFAULT_BPM
+	for tempo in _beat_tempos:
+		var segment := (tempo.position - beat) * 60.0 / bpm
+		if elapsed + segment > seconds:
+			break
+		elapsed += segment
+		beat = tempo.position
+		bpm = tempo.bpm
+	return beat + (seconds - elapsed) * bpm / 60.0
 
 
 ## The TEMPO marker in effect at [param time], or null before the first one.

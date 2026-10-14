@@ -1,3 +1,4 @@
+@tool
 class_name ChirpEventInstance
 extends RefCounted
 ## One live playback of a ChirpEvent. Create with Chirp.create_instance().

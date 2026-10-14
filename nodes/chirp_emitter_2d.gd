@@ -5,6 +5,8 @@ extends Node2D
 ## One-shot events start a new instance on every play(); looping events restart.
 
 @export var event: ChirpEvent
+## Used when event is empty: any "event:/..." path, including plain audio files.
+@export var event_path := ""
 @export var play_on := ChirpEmitterCore.Trigger.NONE
 @export var stop_on := ChirpEmitterCore.Trigger.NONE
 ## Node whose signals drive ENTERED / EXITED / MOUSE_* triggers. Empty = parent.

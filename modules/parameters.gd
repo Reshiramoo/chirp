@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 ## Chirp.parameters: global parameters, shared by every event that automates on them.
 ## Define them in the ChirpConfig resource ("chirp/config" project setting).
