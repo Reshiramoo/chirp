@@ -238,8 +238,13 @@ itself. Give scatterers a length on timelines.
 <a id="property-loop"></a>
 ### bool loop = `false`
 
-SOUND and PROGRAMMER: replay when the stream finishes, until the event is stopped. For gapless loops, enable
-looping in the stream's import settings instead.
+SOUND and PROGRAMMER: loop the sound until the event is stopped. Gapless for WAV, Ogg Vorbis and MP3:
+each voice plays a looping copy of the stream that shares its audio data (no import setting needed,
+and the resource itself is left alone). A stream that already loops keeps its own loop points (e.g.
+an intro before `loop_offset`); other streams (generators, playlists) restart when they finish,
+about a frame late. Joining part way through (a late start, a jump) lands at the matching point in
+the loop. When the instrument is let go (async playback), looping switches off and the current pass
+plays to its end.
 
 ---
 

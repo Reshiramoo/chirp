@@ -281,8 +281,9 @@ The value follows the playhead through loops and jumps; a fade-in over the intro
 before a drop.
 
 **Timing:** the playhead moves once per frame, so markers and jumps are accurate to a frame, not a
-sample. For seamless loops, import the music with looping on and make the loop region the same
-length: when the playhead jumps, voices already at the right spot keep playing instead of
+sample. For seamless loops, use a looping instrument (gapless, see
+[`loop`](docs/classes/ChirpInstrument.md#property-loop)) and make the loop region a whole number of
+its passes: when the playhead jumps, voices already at the right spot keep playing instead of
 restarting (anything more than 50 ms off is re-seeked).
 
 ## Parameter sheets

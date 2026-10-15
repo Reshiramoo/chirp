@@ -29,8 +29,9 @@ enum CutBehavior {
 @export var streams: Array[AudioStream] = []
 ## SHUFFLE plays every entry once in random order and never repeats back-to-back.
 @export var selection := Selection.SHUFFLE
-## Replays when it finishes until the event is stopped (SOUND and PROGRAMMER). For gapless
-## loops, enable looping in the stream's import settings instead.
+## Loops the sound until the event is stopped (SOUND and PROGRAMMER). Gapless for WAV, Ogg Vorbis
+## and MP3: Chirp plays a looping copy that shares the audio data. Loop points set in the
+## import settings are kept; other streams restart when they finish.
 @export var loop := false
 @export_range(-80.0, 24.0, 0.1, "suffix:dB") var volume_db := 0.0
 @export_range(-24.0, 24.0, 0.01, "suffix:st") var pitch_semitones := 0.0

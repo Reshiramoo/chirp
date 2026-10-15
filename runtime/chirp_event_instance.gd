@@ -93,6 +93,7 @@ class Voice:
 	var detached := false # left to play to its end, no longer controlled
 	var fade := 1.0 # PARAMETER sheets: crossfade gain, kept at its last value once detached
 	var start_shift := 0.0 # seconds the sound runs ahead of its timeline position (start offsets)
+	var own_loop: AudioStream # looping instruments: this voice's looping copy of its sound, if any
 
 
 ## One sound started by a SCATTERER voice.
@@ -571,6 +572,8 @@ func _sync_entries() -> void:
 func _resync(voice: Voice, expected: float) -> void:
 	if voice.player:
 		var length: float = voice.player.stream.get_length()
+		if voice.instrument.loop and length > 0.0:
+			expected = fposmod(expected, length)
 		if voice.start_shift > 0.0:
 			if expected >= length and length > 0.0:
 				_stop_voice(voice)
@@ -723,6 +726,12 @@ func _trigger(instrument: ChirpInstrument, offset := 0.0) -> Voice:
 func _start_player(voice: Voice, offset: float, stream: AudioStream) -> bool:
 	if stream == null:
 		return false
+	if voice.instrument.loop:
+		voice.own_loop = _looping_copy(stream)
+		if voice.own_loop:
+			stream = voice.own_loop
+		if stream.get_length() > 0.0:
+			offset = fposmod(offset, stream.get_length())
 	if offset > 0.0 and stream.get_length() > 0.0 and offset >= stream.get_length():
 		return false
 	var player = _new_player(stream)
@@ -764,6 +773,37 @@ func _new_player(stream: AudioStream) -> Node:
 	player.bus = _output_bus()
 	_chirp._voice_root.add_child(player)
 	return player
+
+
+## A copy of [param stream] that loops by itself, so looping instruments wrap around gaplessly
+## instead of restarting a frame late. Shallow: the audio data is shared, not copied. Null when the
+## stream already loops (its own loop points win) or can't loop natively; the instrument then
+## restarts it when it finishes.
+static func _looping_copy(stream: AudioStream) -> AudioStream:
+	if stream is AudioStreamWAV:
+		var wav := stream as AudioStreamWAV
+		if wav.loop_mode != AudioStreamWAV.LOOP_DISABLED or wav.get_length() <= 0.0:
+			return null
+		var copy := wav.duplicate() as AudioStreamWAV
+		copy.loop_mode = AudioStreamWAV.LOOP_FORWARD
+		copy.loop_begin = 0
+		copy.loop_end = roundi(wav.get_length() * wav.mix_rate)
+		return copy
+	if stream is AudioStreamOggVorbis or stream is AudioStreamMP3:
+		if stream.get("loop"):
+			return null
+		var copy := stream.duplicate() as AudioStream
+		copy.set("loop", true)
+		return copy
+	return null
+
+
+## Lets a voice's looping copy play to the end of its current pass and finish.
+static func _end_own_loop(voice: Voice) -> void:
+	if voice.own_loop is AudioStreamWAV:
+		voice.own_loop.loop_mode = AudioStreamWAV.LOOP_DISABLED
+	elif voice.own_loop:
+		voice.own_loop.set("loop", false)
 
 
 ## A trigger's start offset: the fixed one plus a random extra.
@@ -925,6 +965,7 @@ func _detach(voice: Voice) -> void:
 	_entry_voices.erase(voice.entry)
 	voice.entry = -1
 	voice.detached = true
+	_end_own_loop(voice)
 	voice.spawning = false # a detached scatterer lets its sounds finish but starts no more
 	if voice.instrument.kind == ChirpInstrument.Kind.SCATTERER and voice.scattered.is_empty():
 		_on_voice_finished(voice)
