@@ -147,6 +147,15 @@ func beats_between(from: float, to: float) -> Array[Dictionary]:
 	return beats
 
 
+## Beats from the TEMPO marker in effect at [param time] (the grid timeline_beat counts on), or
+## from 0 at 120 BPM before the first one. Fractional.
+func beats_at(time: float) -> float:
+	var tempo := tempo_at(time)
+	if tempo == null:
+		return time * DEFAULT_BPM / 60.0
+	return (time - tempo.time) * tempo.marker.bpm / 60.0
+
+
 ## The first beat or bar line at or after [param time]. Without tempo markers, [param time].
 func next_boundary(time: float, quantization: ChirpMarker.Quantization) -> float:
 	if quantization == ChirpMarker.Quantization.NONE or tempos.is_empty():

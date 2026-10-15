@@ -57,8 +57,10 @@ The inspector only shows the properties the chosen [kind](#property-kind) uses.
 | float | [pitch_semitones](#property-pitch_semitones) | `0.0` |
 | int | [polyphony](#property-polyphony) | `0` |
 | float | [probability](#property-probability) | `100.0` |
+| [Quantization](ChirpMarker.md#enum-quantization) | [quantization](#property-quantization) | `NONE` |
 | String | [programmer_key](#property-programmer_key) | `""` |
 | float | [random_pitch_semitones](#property-random_pitch_semitones) | `0.0` |
+| float | [random_start_offset](#property-random_start_offset) | `0.0` |
 | float | [random_volume_db](#property-random_volume_db) | `0.0` |
 | float | [scatter_distance_max](#property-scatter_distance_max) | `0.0` |
 | float | [scatter_distance_min](#property-scatter_distance_min) | `0.0` |
@@ -67,6 +69,7 @@ The inspector only shows the properties the chosen [kind](#property-kind) uses.
 | float | [spawn_interval_min](#property-spawn_interval_min) | `1.0` |
 | int | [spawn_total](#property-spawn_total) | `0` |
 | float | [start](#property-start) | `0.0` |
+| float | [start_offset](#property-start_offset) | `0.0` |
 | Array[AudioStream] | [streams](#property-streams) | `[]` |
 | float | [volume_db](#property-volume_db) | `0.0` |
 
@@ -258,11 +261,39 @@ PROGRAMMER: the name game code is asked for. Several instruments can share a key
 
 ---
 
+<a id="property-quantization"></a>
+### [Quantization](ChirpMarker.md#enum-quantization) quantization = `NONE`
+
+TIMELINE events: when the instrument becomes due part way through its region (its condition starts
+holding, or a jump lands inside it), wait for the next beat or bar line of the TEMPO markers and play
+it **from its beginning**. Without quantization it starts right away at the matching point of its
+sound, in sync with the timeline. Use it for stingers triggered by gameplay over music:
+
+```gdscript
+# A brass hit gated by "Combo" (condition_min 10), over the whole verse, quantization BAR:
+music.set_parameter("Combo", combo) # once it reaches 10, the hit plays on the next bar
+```
+
+A quantized instrument isn't re-seeked by jumps (it keeps playing from where it is), but still stops
+when the playhead leaves its region, unless it is async. If the condition stops holding before the
+line, it doesn't play. Without TEMPO markers it plays right away, from its beginning.
+
+---
+
 <a id="property-random_pitch_semitones"></a>
 ### float random_pitch_semitones = `0.0`
 
 SOUND, SCATTERER, PROGRAMMER: each trigger (for a scatterer, each scattered sound) is detuned by a
 random amount within ± this many semitones.
+
+---
+
+<a id="property-random_start_offset"></a>
+### float random_start_offset = `0.0`
+
+SOUND, SCATTERER, PROGRAMMER: each trigger (each scattered sound) starts up to this many seconds
+further into the sound, at random, on top of [start_offset](#property-start_offset), so long
+ambient loops played several times don't start in unison. Wraps past the sound's end.
 
 ---
 
@@ -326,6 +357,14 @@ stopped; such an event never ends by itself.
 
 TIMELINE events: where the instrument starts on the timeline, in the event's timeline units.
 PARAMETER sheets: where its range starts on the parameter's axis.
+
+---
+
+<a id="property-start_offset"></a>
+### float start_offset = `0.0`
+
+SOUND, SCATTERER, PROGRAMMER: seconds into the sound every trigger starts at. Wraps past the sound's
+end. On a timeline, the sound runs this far ahead of the playhead, and re-seeks after jumps keep it.
 
 ---
 

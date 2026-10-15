@@ -75,6 +75,12 @@ enum CutBehavior {
 @export_range(0.0, 24.0, 0.1, "suffix:dB") var random_volume_db := 0.0
 ## Each trigger is detuned by a random amount within ± this.
 @export_range(0.0, 12.0, 0.01, "suffix:st") var random_pitch_semitones := 0.0
+## Seconds into the sound that every trigger starts at (SOUND, SCATTERER, PROGRAMMER). Wraps past
+## the sound's end.
+@export_range(0.0, 60.0, 0.01, "or_greater", "suffix:s") var start_offset := 0.0
+## Each trigger starts up to this many seconds further in, at random (e.g. so ambient loops don't
+## start in unison). Wraps past the sound's end.
+@export_range(0.0, 60.0, 0.01, "or_greater", "suffix:s") var random_start_offset := 0.0
 
 @export_group("Trigger")
 ## Seconds to wait before playing (action and consecutive sheets).
@@ -86,11 +92,17 @@ enum CutBehavior {
 @export var condition_max := 1.0
 ## What happens when the condition stops holding, or a timeline jump leaves the instrument.
 @export var cut_behavior := CutBehavior.STOP
+## TIMELINE events: when the instrument becomes due mid-region (its condition starts holding, or
+## a jump lands inside it), wait for the next beat or bar of the TEMPO markers and play it from
+## its beginning, instead of right away at the matching point. For stingers over music.
+@export var quantization := ChirpMarker.Quantization.NONE
 
 const _KIND_FIELDS := {
 	"streams": [Kind.SOUND, Kind.SCATTERER], "selection": [Kind.SOUND, Kind.SCATTERER],
 	"loop": [Kind.SOUND, Kind.PROGRAMMER],
 	"random_pitch_semitones": [Kind.SOUND, Kind.SCATTERER, Kind.PROGRAMMER],
+	"start_offset": [Kind.SOUND, Kind.SCATTERER, Kind.PROGRAMMER],
+	"random_start_offset": [Kind.SOUND, Kind.SCATTERER, Kind.PROGRAMMER],
 	"event": [Kind.EVENT], "duration": [Kind.SILENCE], "programmer_key": [Kind.PROGRAMMER],
 	"spawn_interval_min": [Kind.SCATTERER], "spawn_interval_max": [Kind.SCATTERER],
 	"polyphony": [Kind.SCATTERER], "spawn_total": [Kind.SCATTERER],

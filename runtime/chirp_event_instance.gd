@@ -75,6 +75,7 @@ var _jump := {} # pending (quantized) transition: {time, target: Mark}
 var _jumped := false # the playhead jumped this frame
 var _entry_voices := {} # timeline / parameter sheet instrument index -> Voice
 var _entry_done := {} # instrument index -> true once triggered (until it leaves its range)
+var _quantized := {} # timeline entry index -> playhead time a quantized instrument waits for
 
 
 class Voice:
@@ -91,6 +92,7 @@ class Voice:
 	var entry := -1 # timeline entry index, -1 when not following the timeline
 	var detached := false # left to play to its end, no longer controlled
 	var fade := 1.0 # PARAMETER sheets: crossfade gain, kept at its last value once detached
+	var start_shift := 0.0 # seconds the sound runs ahead of its timeline position (start offsets)
 
 
 ## One sound started by a SCATTERER voice.
@@ -406,6 +408,7 @@ func _reset_timeline_pass() -> void:
 	_jumped = false
 	_entry_voices.clear()
 	_entry_done.clear()
+	_quantized.clear()
 
 
 func _timeline_finished() -> bool:
@@ -522,6 +525,8 @@ func _emit_timeline_events(from: float, to: float) -> void:
 
 ## Starts, stops and re-seeks instruments so they match the playhead.
 func _sync_entries() -> void:
+	if _jumped:
+		_quantized.clear() # boundaries worked out before the jump are stale
 	for entry in _timeline.entries:
 		var inside := _playhead >= entry.start and _playhead < entry.end
 		var holds := _instrument_condition(entry.instrument)
@@ -535,24 +540,42 @@ func _sync_entries() -> void:
 					_stop_voice(voice)
 			elif not holds:
 				_cut(voice)
-			elif _jumped and not entry.instrument.async_playback:
+			elif _jumped and not entry.instrument.async_playback \
+					and entry.instrument.quantization == ChirpMarker.Quantization.NONE:
 				_resync(voice, _playhead - entry.start)
 		if _entry_voices.has(entry.index):
 			continue
 		if not inside or _jumped:
 			_entry_done.erase(entry.index)
-		if inside and holds and _state == State.PLAYING and not _entry_done.has(entry.index):
-			_entry_done[entry.index] = true
-			if randf() * 100.0 < entry.instrument.probability:
-				var started_voice := _trigger(entry.instrument, _playhead - entry.start)
-				if started_voice:
-					started_voice.entry = entry.index
-					_entry_voices[entry.index] = started_voice
+		if not (inside and holds and _state == State.PLAYING) or _entry_done.has(entry.index):
+			_quantized.erase(entry.index)
+			continue
+		var offset := _playhead - entry.start
+		if entry.instrument.quantization != ChirpMarker.Quantization.NONE:
+			# Wait for the next beat or bar line, then play from the beginning.
+			# (A line past the region's end is never reached: leaving the region cancels the wait.)
+			if not _quantized.has(entry.index):
+				_quantized[entry.index] = _timeline.next_boundary(_playhead, entry.instrument.quantization)
+			if _playhead < _quantized[entry.index] - Timeline.EPSILON:
+				continue
+			_quantized.erase(entry.index)
+			offset = 0.0
+		_entry_done[entry.index] = true
+		if randf() * 100.0 < entry.instrument.probability:
+			var started_voice := _trigger(entry.instrument, offset)
+			if started_voice:
+				started_voice.entry = entry.index
+				_entry_voices[entry.index] = started_voice
 
 
 func _resync(voice: Voice, expected: float) -> void:
 	if voice.player:
 		var length: float = voice.player.stream.get_length()
+		if voice.start_shift > 0.0:
+			if expected >= length and length > 0.0:
+				_stop_voice(voice)
+				return
+			expected = _shifted(expected, voice.start_shift, length)
 		var drift: float = absf(voice.player.get_playback_position() - expected)
 		if length > 0.0:
 			drift = minf(drift, absf(length - drift)) # a looping stream may have wrapped
@@ -687,9 +710,11 @@ func _trigger(instrument: ChirpInstrument, offset := 0.0) -> Voice:
 			if not _start_scatterer(voice):
 				return null
 		ChirpInstrument.Kind.PROGRAMMER:
+			voice.start_shift = _start_shift(instrument)
 			if not _start_player(voice, offset, _programmer_stream(instrument)):
 				return null
 		_:
+			voice.start_shift = _start_shift(instrument)
 			if not _start_player(voice, offset, instrument.pick_stream()):
 				return null
 	return voice
@@ -705,7 +730,7 @@ func _start_player(voice: Voice, offset: float, stream: AudioStream) -> bool:
 	_voices.append(voice)
 	_apply(voice, _automation(ChirpAutomation.Target.VOLUME), _automation(ChirpAutomation.Target.PITCH))
 	player.finished.connect(_on_voice_finished.bind(voice))
-	player.play(offset)
+	player.play(_shifted(offset, voice.start_shift, stream.get_length()))
 	player.stream_paused = _applied_paused
 	return true
 
@@ -739,6 +764,18 @@ func _new_player(stream: AudioStream) -> Node:
 	player.bus = _output_bus()
 	_chirp._voice_root.add_child(player)
 	return player
+
+
+## A trigger's start offset: the fixed one plus a random extra.
+static func _start_shift(instrument: ChirpInstrument) -> float:
+	return instrument.start_offset + randf() * instrument.random_start_offset
+
+
+## [param position] moved on by [param shift], wrapped into a sound of [param length] seconds.
+static func _shifted(position: float, shift: float, length: float) -> float:
+	if shift <= 0.0:
+		return position
+	return fposmod(position + shift, length) if length > 0.0 else position + shift
 
 
 ## PROGRAMMER: asks game code for the sound (signal, then this instance's sounds, then the
@@ -796,7 +833,7 @@ func _spawn(voice: Voice) -> void:
 	voice.spawned += 1
 	_apply(voice, _automation(ChirpAutomation.Target.VOLUME), _automation(ChirpAutomation.Target.PITCH))
 	sound.player.finished.connect(_on_scattered_finished.bind(voice, sound))
-	sound.player.play()
+	sound.player.play(_shifted(0.0, _start_shift(instrument), stream.get_length()))
 	sound.player.stream_paused = _applied_paused
 
 
@@ -987,7 +1024,10 @@ func _automation(target: ChirpAutomation.Target) -> float:
 			factor *= automation.evaluate(state.def, state.value)
 	for modulator in _event.modulators:
 		if modulator and int(modulator.target) == int(target):
-			factor *= modulator.factor(_time, _lfo_seed)
+			if modulator.tempo_sync:
+				factor *= modulator.factor_at_beat(_timeline.beats_at(_playhead) if _timeline else _time * 2.0, _lfo_seed)
+			else:
+				factor *= modulator.factor(_time, _lfo_seed)
 	return factor
 
 

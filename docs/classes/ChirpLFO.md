@@ -10,6 +10,12 @@ Add to [ChirpEvent.modulators](ChirpEvent.md#property-modulators) for tremolo, v
 engines, independent of parameters. The wave starts when the instance starts. Several LFOs on the
 same target multiply.
 
+With [tempo_sync](#property-tempo_sync), the cycle follows the beat instead of [rate](#property-rate):
+[beats_per_cycle](#property-beats_per_cycle) beats per cycle. On TIMELINE events it locks to the
+beat grid of the TEMPO marker in effect (the grid [timeline_beat](ChirpEventInstance.md#signal-timeline_beat)
+counts on), so a wobble stays on the beat through tempo changes and jumps; elsewhere it runs at
+120 BPM from the start.
+
 ```gdscript
 var vibrato := ChirpLFO.new()
 vibrato.target = ChirpLFO.Target.PITCH
@@ -24,16 +30,21 @@ event.modulators.append(vibrato)
 |---|---|---|
 | float | [depth](#property-depth) | `0.5` |
 | float | [phase](#property-phase) | `0.0` |
+| float | [beats_per_cycle](#property-beats_per_cycle) | `1.0` |
 | float | [rate](#property-rate) | `1.0` |
 | [Shape](#enum-shape) | [shape](#property-shape) | `SINE` |
 | [Target](#enum-target) | [target](#property-target) | `VOLUME` |
+| bool | [tempo_sync](#property-tempo_sync) | `false` |
 
 ## Methods
 
 | Return | Signature |
 |---|---|
 | float | [factor](#method-factor)(time: float, seed: int) |
+| float | [factor_at_beat](#method-factor_at_beat)(beats: float, seed: int) |
+| float | [factor_at_cycle](#method-factor_at_cycle)(cycle: float, seed: int) |
 | float | [sample](#method-sample)(time: float, seed: int) |
+| float | [sample_at_cycle](#method-sample_at_cycle)(cycle: float, seed: int) |
 
 ## Enumerations
 
@@ -57,6 +68,14 @@ event.modulators.append(vibrato)
 
 ## Property Descriptions
 
+<a id="property-beats_per_cycle"></a>
+### float beats_per_cycle = `1.0`
+
+With [tempo_sync](#property-tempo_sync): beats per cycle. 1 = one cycle per beat, 0.5 = eighth
+notes, 0.25 = sixteenths, 4 = a bar of 4/4.
+
+---
+
 <a id="property-depth"></a>
 ### float depth = `0.5`
 
@@ -75,7 +94,7 @@ Starting point in the cycle, 0..1 (0.25 starts a sine at its peak).
 <a id="property-rate"></a>
 ### float rate = `1.0`
 
-Cycles per second (Hz).
+Cycles per second (Hz), without [tempo_sync](#property-tempo_sync).
 
 ---
 
@@ -83,6 +102,14 @@ Cycles per second (Hz).
 ### [Shape](#enum-shape) shape = `SINE`
 
 The wave. See [Shape](#enum-shape).
+
+---
+
+<a id="property-tempo_sync"></a>
+### bool tempo_sync = `false`
+
+Follow the beat instead of [rate](#property-rate). See the description above. The inspector shows
+[beats_per_cycle](#property-beats_per_cycle) instead of rate while it's on.
 
 ---
 
@@ -102,7 +129,28 @@ The multiplier for the target, `time` seconds after the instance started. VOLUME
 
 ---
 
+<a id="method-factor_at_beat"></a>
+### float factor_at_beat(beats: float, seed: int)
+
+The multiplier `beats` beats into the beat grid, at [beats_per_cycle](#property-beats_per_cycle) beats per cycle (used with [tempo_sync](#property-tempo_sync)).
+
+---
+
+<a id="method-factor_at_cycle"></a>
+### float factor_at_cycle(cycle: float, seed: int)
+
+The multiplier `cycle` cycles in ([phase](#property-phase) is added).
+
+---
+
 <a id="method-sample"></a>
 ### float sample(time: float, seed: int)
 
 The raw wave at `time`, between -1 and 1.
+
+---
+
+<a id="method-sample_at_cycle"></a>
+### float sample_at_cycle(cycle: float, seed: int)
+
+The raw wave `cycle` cycles in ([phase](#property-phase) is added), between -1 and 1.

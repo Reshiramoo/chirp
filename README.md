@@ -108,14 +108,14 @@ A ChirpEvent is a list of [ChirpInstrument](docs/classes/ChirpInstrument.md)s pl
 
 | ChirpEvent property | Meaning |
 |---|---|
-| `instruments` | What plays. A `SOUND` instrument has one stream (single sound) or several (playlist: shuffle / random / sequential); `EVENT` nests another event; `SILENCE` waits; `SCATTERER` plays sounds at random intervals and positions; `PROGRAMMER` plays a sound game code supplies. Per-instrument volume, pitch, random volume/pitch, delay, probability, a parameter condition and a cut behaviour. |
+| `instruments` | What plays. A `SOUND` instrument has one stream (single sound) or several (playlist: shuffle / random / sequential); `EVENT` nests another event; `SILENCE` waits; `SCATTERER` plays sounds at random intervals and positions; `PROGRAMMER` plays a sound game code supplies. Per-instrument volume, pitch, random volume/pitch, a fixed or random start offset, delay, probability, a parameter condition, a cut behaviour and (on timelines) quantization. |
 | `sheet_mode` | `SIMULTANEOUS` triggers all instruments; `CONSECUTIVE` plays them one after another; `TIMELINE` places them on a timeline; `PARAMETER` places them along a parameter. |
 | `persistent` | Keep playing after the content ends, until stopped. |
 | `bus` | Bus path; empty = its sound directory's bus. |
 | `parameters` | Local [ChirpParameter](docs/classes/ChirpParameter.md)s: continuous, discrete or labeled, with optional seek speed. Or built-in. |
 | `automations` | [ChirpAutomation](docs/classes/ChirpAutomation.md): volume, pitch, pan or an effect property, from a parameter through a `Curve` or drawn along a timeline. |
 | `effects` / `effect_scope` | Effects the event plays through, per instance or shared (see [Effects per event](#effects-per-event)). |
-| `modulators` | [ChirpLFO](docs/classes/ChirpLFO.md): sine, triangle, square, saw or random waves on volume or pitch. |
+| `modulators` | [ChirpLFO](docs/classes/ChirpLFO.md): sine, triangle, square, saw or random waves on volume or pitch, in Hz or synced to the tempo. |
 | `envelope` | [ChirpEnvelope](docs/classes/ChirpEnvelope.md) (AHDSR). `release` is the fade-out used by `stop()`. |
 | `max_instances` / `stealing` / `cooldown` | Voice limits: steal oldest, quietest, furthest, or refuse. |
 | `rolloff` / `min_distance` / `max_distance` | Distance roll-off: Godot's, or linear, inverse, tapered or a custom curve (see [Listeners and roll-off](#listeners-and-roll-off)). |
@@ -256,7 +256,9 @@ Everything else on the timeline is a [ChirpMarker](docs/classes/ChirpMarker.md) 
 
 Conditions are a parameter range (local or global) and a probability. Instruments can have
 conditions too, and a cut behaviour (`STOP` or `PLAY_TO_END`) for when it stops holding or a
-jump leaves them.
+jump leaves them. An instrument with `quantization` (beat or bar) that becomes due part way through
+its region waits for the next beat or bar and plays from its beginning: a stinger over the music
+when gameplay sets a parameter. LFOs with `tempo_sync` wobble in time with the tempo markers.
 
 A typical adaptive track: intro, then a loop region on the verse that holds while `Intensity` < 0.5,
 and a transition region over the verse that jumps to `"chorus"` on the next bar once `Intensity`

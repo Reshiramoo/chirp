@@ -192,6 +192,8 @@ func _draw() -> void:
 			tags.append("async")
 		if instrument.loop:
 			tags.append("loop")
+		if instrument.quantization != ChirpMarker.Quantization.NONE:
+			tags.append("on " + ChirpMarker.Quantization.keys()[instrument.quantization].to_lower())
 		if not instrument.condition_parameter.is_empty():
 			tags.append("if " + instrument.condition_parameter)
 		if not tags.is_empty():
