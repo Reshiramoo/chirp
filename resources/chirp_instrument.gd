@@ -92,6 +92,9 @@ enum CutBehavior {
 @export var condition_max := 1.0
 ## What happens when the condition stops holding, or a timeline jump leaves the instrument.
 @export var cut_behavior := CutBehavior.STOP
+## VOLUME and PITCH automation of this instrument alone (e.g. crossfading two layers), along the
+## timeline (TIMELINE source) or a parameter (PARAMETER source). They multiply with the event's.
+@export var automations: Array[ChirpAutomation] = []
 ## TIMELINE events: when the instrument becomes due mid-region (its condition starts holding, or
 ## a jump lands inside it), wait for the next beat or bar of the TEMPO markers and play it from
 ## its beginning, instead of right away at the matching point. For stingers over music.

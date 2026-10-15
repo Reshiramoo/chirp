@@ -42,6 +42,7 @@ The inspector only shows the properties the chosen [kind](#property-kind) uses.
 | Type | Name | Default |
 |---|---|---|
 | bool | [async_playback](#property-async_playback) | `false` |
+| Array[[ChirpAutomation](ChirpAutomation.md)] | [automations](#property-automations) | `[]` |
 | String | [condition_parameter](#property-condition_parameter) | `""` |
 | float | [condition_max](#property-condition_max) | `1.0` |
 | float | [condition_min](#property-condition_min) | `0.0` |
@@ -128,6 +129,16 @@ TIMELINE events and PARAMETER sheets: once triggered, play to the sound's own en
 following the playhead or the parameter (not stopped when the playhead or value leaves, not
 re-seeked by jumps). An async scatterer stops spawning
 when the playhead leaves, and lets its sounds finish.
+
+---
+
+<a id="property-automations"></a>
+### Array[[ChirpAutomation](ChirpAutomation.md)] automations = `[]`
+
+VOLUME and PITCH automation of this instrument alone, e.g. two layers crossfading over a timeline
+or along a parameter. They multiply with the event's own automations. In the **Chirp Event** dock,
+right-click the instrument → **Add Volume Automation (this instrument)**; its lanes sit right under
+it. PAN and EFFECT targets work on the whole event only.
 
 ---
 

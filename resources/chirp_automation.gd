@@ -29,6 +29,7 @@ const TIMELINE_RANGE := {Target.VOLUME: Vector2(0.0, 1.0), Target.PITCH: Vector2
 	set(value):
 		source = value
 		notify_property_list_changed()
+## PARAMETER source: the parameter's name. Empty on a PARAMETER sheet = the sheet parameter.
 @export var parameter := ""
 ## Read the value from a global parameter instead of the event's own.
 @export var global := false

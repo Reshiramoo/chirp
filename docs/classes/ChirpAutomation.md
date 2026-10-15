@@ -6,7 +6,9 @@ Drives an event's volume, pitch, pan or an effect property from a parameter, or 
 
 ## Description
 
-Add to [ChirpEvent.automations](ChirpEvent.md#property-automations). Every frame the automation gives
+Add to [ChirpEvent.automations](ChirpEvent.md#property-automations) for the whole event, or to an
+instrument's [automations](ChirpInstrument.md#property-automations) (VOLUME and PITCH) for that
+instrument alone. Every frame the automation gives
 a value for its [target](#property-target). VOLUME (linear gain) and PITCH (pitch scale) are
 multipliers, and several automations on them multiply. PAN (-1 left to 1 right) and EFFECT (the
 effect property's own value, e.g. a cutoff in Hz) set the value; with several on the same property,
@@ -134,7 +136,9 @@ PARAMETER: read a global parameter (from [ChirpConfig](ChirpConfig.md)) instead 
 <a id="property-parameter"></a>
 ### String parameter = `""`
 
-PARAMETER: name of the parameter (case-insensitive). If it doesn't exist, the automation has no effect.
+PARAMETER: name of the parameter (case-insensitive). On a PARAMETER sheet, empty means the sheet
+parameter (lanes added in the dock leave it empty, so they follow the sheet parameter even if it is
+renamed). If the parameter doesn't exist, the automation has no effect.
 
 ---
 

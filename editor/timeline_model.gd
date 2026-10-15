@@ -215,38 +215,82 @@ func _flag_layout() -> Dictionary:
 	return _flags_cache
 
 
+## Top of instrument row [param index]. Each instrument's own automation lanes sit right below it.
 func instrument_y(index: int) -> float:
-	return regions_lane_y() + (0.0 if is_sheet() else _region_lane_count * lane_height) + index * row_height
+	var y := regions_lane_y() + (0.0 if is_sheet() else _region_lane_count * lane_height)
+	if event == null:
+		return y
+	for i in mini(index, event.instruments.size()):
+		y += row_height + _shown_lanes(event.instruments[i].automations if event.instruments[i] else []).size() * automation_height
+	return y + maxi(index - event.instruments.size(), 0) * row_height
+
+
+## The instrument row at [param y], or -1 (lanes and empty space aren't rows).
+func instrument_row_at(y: float) -> int:
+	if event == null:
+		return -1
+	for i in event.instruments.size():
+		var top := instrument_y(i)
+		if y >= top and y < top + row_height:
+			return i if event.instruments[i] else -1
+	return -1
 
 
 func content_height() -> float:
-	return automation_y(automation_lanes().size()) + 8.0
+	if event == null:
+		return instrument_y(0) + 8.0
+	return instrument_y(event.instruments.size()) + _shown_lanes(event.automations).size() * automation_height + 8.0
 
 
 # --- timeline automation lanes ------------------------------------------------------------
 
-## Automation lanes: [{index, automation}], index being the automation's position in the event.
-## TIMELINE events: the TIMELINE-source automations. PARAMETER sheets: the PARAMETER-source
-## automations of the sheet parameter that have a curve (their X axis is the sheet's).
+## Automation lanes in display order: each instrument's own right below it, then the event's.
+## [{automation, owner, index, y}]: owner is the instrument's index, or -1 for the event's lanes;
+## index is the automation's position in its owner's automations; y is the lane's top.
+## TIMELINE events show TIMELINE-source automations. PARAMETER sheets show PARAMETER-source ones
+## with a curve on the sheet parameter (an empty parameter name means the sheet's).
 func automation_lanes() -> Array[Dictionary]:
 	var lanes: Array[Dictionary] = []
 	if event == null:
 		return lanes
-	for i in event.automations.size():
-		var automation := event.automations[i]
-		if automation == null:
+	for i in event.instruments.size():
+		var instrument := event.instruments[i]
+		if instrument == null:
 			continue
-		if is_sheet():
-			if automation.source == ChirpAutomation.Source.PARAMETER and automation.curve \
-					and automation.parameter.nocasecmp_to(event.sheet_parameter) == 0:
-				lanes.append({index = i, automation = automation})
-		elif automation.source == ChirpAutomation.Source.TIMELINE:
-			lanes.append({index = i, automation = automation})
+		var y := instrument_y(i) + row_height
+		for entry in _shown_lanes(instrument.automations):
+			lanes.append({automation = entry.automation, owner = i, index = entry.index, y = y})
+			y += automation_height
+	var y := instrument_y(event.instruments.size())
+	for entry in _shown_lanes(event.automations):
+		lanes.append({automation = entry.automation, owner = -1, index = entry.index, y = y})
+		y += automation_height
 	return lanes
 
 
-## Top of automation lane [param lane], below the instruments.
+## The automations of [param automations] that get a lane here: [{automation, index}].
+func _shown_lanes(automations: Array) -> Array[Dictionary]:
+	var shown: Array[Dictionary] = []
+	for i in automations.size():
+		var automation: ChirpAutomation = automations[i]
+		if automation == null:
+			continue
+		if is_sheet():
+			if automation.source == ChirpAutomation.Source.PARAMETER and automation.curve and (automation.parameter.is_empty() \
+					or automation.parameter.nocasecmp_to(event.sheet_parameter) == 0):
+				shown.append({automation = automation, index = i})
+		elif automation.source == ChirpAutomation.Source.TIMELINE:
+			shown.append({automation = automation, index = i})
+	return shown
+
+
+## Top of automation lane [param lane] (an index into automation_lanes()).
 func automation_y(lane: int) -> float:
+	var lanes := automation_lanes()
+	if lane < lanes.size():
+		return lanes[lane].y
+	if not lanes.is_empty(): # past the last lane: continue after it
+		return lanes[-1].y + (lane - lanes.size() + 1) * automation_height
 	return instrument_y(event.instruments.size() if event else 0) + lane * automation_height
 
 
@@ -578,8 +622,8 @@ func hit_test(point: Vector2) -> Dictionary:
 	if event == null:
 		return hit
 	if point.x < header_width:
-		var row := int((point.y - instrument_y(0)) / row_height)
-		if point.y >= instrument_y(0) and row < event.instruments.size() and event.instruments[row]:
+		var row := instrument_row_at(point.y)
+		if row >= 0:
 			hit.area = "header"
 			hit.index = row
 			hit.part = "label"
@@ -621,9 +665,8 @@ func hit_test(point: Vector2) -> Dictionary:
 				return hit
 		return hit
 	var lanes := automation_lanes()
-	if not lanes.is_empty() and point.y >= automation_y(0):
-		var lane := int((point.y - automation_y(0)) / automation_height)
-		if lane < lanes.size():
+	for lane in lanes.size():
+		if point.y >= lanes[lane].y and point.y < lanes[lane].y + automation_height:
 			var automation: ChirpAutomation = lanes[lane].automation
 			hit.area = "automation"
 			hit.index = lane
@@ -637,9 +680,9 @@ func hit_test(point: Vector2) -> Dictionary:
 				if distance <= point_radius + 4.0 and distance < nearest:
 					nearest = distance
 					hit.point = i
-		return hit
-	var row := int((point.y - instrument_y(0)) / row_height)
-	if row < event.instruments.size() and event.instruments[row]:
+			return hit
+	var row := instrument_row_at(point.y)
+	if row >= 0:
 		var span := instrument_span(event.instruments[row])
 		var part := _span_part(point.x, span.x, span.y)
 		if not part.is_empty():

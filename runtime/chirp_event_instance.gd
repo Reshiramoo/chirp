@@ -960,6 +960,9 @@ func _apply(voice: Voice, volume_factor: float, pitch_factor: float) -> void:
 	# The instrument's volume is read live, so the editor's volume knob is heard while playing.
 	var gain: float = _get_level() * voice.gain * db_to_linear(voice.instrument.volume_db) * volume_factor \
 		* _chirp._audition_gain(_event, voice.instrument)
+	if not voice.instrument.automations.is_empty():
+		gain *= _automations_factor(voice.instrument.automations, ChirpAutomation.Target.VOLUME)
+		pitch_factor *= _automations_factor(voice.instrument.automations, ChirpAutomation.Target.PITCH)
 	if _event.sheet_mode == ChirpEvent.SheetMode.PARAMETER:
 		if voice.entry >= 0:
 			voice.fade = _sheet_fade(voice.instrument)
@@ -1007,27 +1010,24 @@ func _rolloff_at(distance: float) -> float:
 
 
 func _automation(target: ChirpAutomation.Target) -> float:
-	var factor := 1.0
-	for automation in _event.automations:
-		if automation == null or automation.target != target:
-			continue
-		if automation.source == ChirpAutomation.Source.TIMELINE:
-			if _timeline:
-				factor *= automation.value_at(_timeline.to_units(_playhead))
-			continue
-		var state: ChirpParameter.State
-		if automation.global:
-			state = _chirp.parameters._get_state(automation.parameter)
-		else:
-			state = _params.get(automation.parameter.to_lower())
-		if state:
-			factor *= automation.evaluate(state.def, state.value)
+	var factor := _automations_factor(_event.automations, target)
 	for modulator in _event.modulators:
 		if modulator and int(modulator.target) == int(target):
 			if modulator.tempo_sync:
 				factor *= modulator.factor_at_beat(_timeline.beats_at(_playhead) if _timeline else _time * 2.0, _lfo_seed)
 			else:
 				factor *= modulator.factor(_time, _lfo_seed)
+	return factor
+
+
+## Product of the VOLUME or PITCH [param automations] (the event's, or one instrument's).
+func _automations_factor(automations: Array[ChirpAutomation], target: ChirpAutomation.Target) -> float:
+	var factor := 1.0
+	for automation in automations:
+		if automation and automation.target == target:
+			var value: Variant = _automation_value(automation)
+			if value != null:
+				factor *= value
 	return factor
 
 
@@ -1228,7 +1228,9 @@ func _automation_value(automation: ChirpAutomation) -> Variant:
 			return null
 		return automation.value_at(_timeline.to_units(_playhead))
 	var state: ChirpParameter.State
-	if automation.global:
+	if automation.parameter.is_empty() and _event.sheet_mode == ChirpEvent.SheetMode.PARAMETER:
+		state = _sheet_state() # empty on a parameter sheet = the sheet parameter
+	elif automation.global:
 		state = _chirp.parameters._get_state(automation.parameter)
 	else:
 		state = _params.get(automation.parameter.to_lower())

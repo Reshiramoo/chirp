@@ -14,6 +14,8 @@ const ADD_INSTRUMENT := 100
 const ADD_VOLUME_LANE := 101
 const ADD_PITCH_LANE := 102
 const ADD_PAN_LANE := 103
+const ADD_INSTRUMENT_VOLUME_LANE := 104
+const ADD_INSTRUMENT_PITCH_LANE := 105
 const ADD_EFFECT_LANE := 1000 # + an index into _effect_menu
 const DELETE := 200
 const INSPECT := 201
@@ -260,6 +262,9 @@ func _on_context_requested(screen_position: Vector2, hit: Dictionary) -> void:
 			_context.add_icon_item(_icon("Rename"), "Rename", RENAME)
 		if hit.area == "automation" and hit.point >= 0:
 			_context.add_icon_item(_icon("Remove"), "Delete Point", DELETE_POINT)
+		if _context_resource is ChirpInstrument:
+			_context.add_icon_item(_icon("Curve"), "Add Volume Automation (this instrument)", ADD_INSTRUMENT_VOLUME_LANE)
+			_context.add_icon_item(_icon("Curve"), "Add Pitch Automation (this instrument)", ADD_INSTRUMENT_PITCH_LANE)
 		_context.add_icon_item(_icon("Remove"), "Delete Lane" if _context_resource is ChirpAutomation else "Delete", DELETE)
 		_context.add_separator()
 	_fill_add_menu(_context)
@@ -311,6 +316,9 @@ func _on_add(id: int, unit: float) -> void:
 			_add_to("instruments", instrument, "Add Instrument")
 		ADD_VOLUME_LANE, ADD_PITCH_LANE, ADD_PAN_LANE:
 			_add_lane(id, at)
+		ADD_INSTRUMENT_VOLUME_LANE, ADD_INSTRUMENT_PITCH_LANE:
+			if _context_resource is ChirpInstrument:
+				_add_lane(ADD_VOLUME_LANE if id == ADD_INSTRUMENT_VOLUME_LANE else ADD_PITCH_LANE, at, _context_resource)
 		_:
 			if id >= ADD_EFFECT_LANE:
 				if id - ADD_EFFECT_LANE < _effect_menu.size():
@@ -320,8 +328,9 @@ func _on_add(id: int, unit: float) -> void:
 
 
 ## Adds an automation lane (volume, pitch, pan, or an effect property from the Add menu) with one
-## point at [param at], at the property's current value.
-func _add_lane(id: int, at: float) -> void:
+## point at [param at], at the property's current value: to [param instrument] (volume and pitch
+## only), else to the event.
+func _add_lane(id: int, at: float, instrument: ChirpInstrument = null) -> void:
 	var model := _view.model
 	var automation := ChirpAutomation.new()
 	var start_value := 1.0
@@ -343,9 +352,7 @@ func _add_lane(id: int, at: float) -> void:
 	var span := automation.lane_range()
 	start_value = clampf(start_value, span.x, span.y)
 	if model.is_sheet():
-		# A curve along the sheet parameter, spanning the property's range.
-		automation.parameter = _event.sheet_parameter
-		automation.global = _event.find_parameter(_event.sheet_parameter) == null
+		# A curve along the sheet parameter (an empty name follows it), spanning the property's range.
 		automation.curve = Curve.new()
 		automation.curve.min_value = span.x
 		automation.curve.max_value = span.y
@@ -353,7 +360,10 @@ func _add_lane(id: int, at: float) -> void:
 	else:
 		automation.source = ChirpAutomation.Source.TIMELINE
 		automation.points = PackedVector2Array([Vector2(at, start_value)])
-	_add_to("automations", automation, "Add %s Automation" % model.automation_title(automation))
+	if instrument:
+		_add_to("automations", automation, "Add Instrument %s Automation" % model.automation_title(automation), instrument)
+	else:
+		_add_to("automations", automation, "Add %s Automation" % model.automation_title(automation))
 
 
 func _add_marker(kind: int, at: float) -> void:
@@ -457,11 +467,13 @@ static func _marker_icon(kind: int) -> Texture2D:
 	return ImageTexture.create_from_image(image)
 
 
-func _add_to(property: String, resource: Resource, action: String) -> void:
-	var before: Array = _event.get(property)
+## Appends [param resource] to [param property] of [param owner] (the event by default), undoably.
+func _add_to(property: String, resource: Resource, action: String, owner: Resource = null) -> void:
+	owner = owner if owner else _event
+	var before: Array = owner.get(property)
 	var after := before.duplicate()
 	after.append(resource)
-	_commit_array(property, before.duplicate(), after, action)
+	_commit_array(property, before.duplicate(), after, action, owner)
 	_view.selected = resource
 	_on_item_selected(resource)
 
@@ -471,11 +483,16 @@ func _delete(resource: Resource) -> void:
 		return
 	var property := "instruments" if resource is ChirpInstrument \
 		else "automations" if resource is ChirpAutomation else "markers"
-	var before: Array = _event.get(property)
+	var owner: Resource = _event
+	if resource is ChirpAutomation and resource not in _event.automations:
+		for instrument in _event.instruments: # an instrument's own lane
+			if instrument and resource in instrument.automations:
+				owner = instrument
+	var before: Array = owner.get(property)
 	var after := before.duplicate()
 	after.erase(resource)
 	var noun := "Instrument" if resource is ChirpInstrument else "Automation Lane" if resource is ChirpAutomation else "Marker"
-	_commit_array(property, before.duplicate(), after, "Delete %s" % noun)
+	_commit_array(property, before.duplicate(), after, "Delete %s" % noun, owner)
 	_view.selected = null
 	_view.selected_point = {}
 
@@ -501,13 +518,14 @@ func _on_instrument_volume_changed(instrument: ChirpInstrument, before_db: float
 	undo_redo.commit_action()
 
 
-func _commit_array(property: String, before: Array, after: Array, action: String) -> void:
+func _commit_array(property: String, before: Array, after: Array, action: String, owner: Resource = null) -> void:
+	owner = owner if owner else _event
 	var undo_redo := _plugin.get_undo_redo()
 	undo_redo.create_action(action)
-	undo_redo.add_do_property(_event, property, after)
-	undo_redo.add_undo_property(_event, property, before)
-	undo_redo.add_do_method(self, "_changed", _event)
-	undo_redo.add_undo_method(self, "_changed", _event)
+	undo_redo.add_do_property(owner, property, after)
+	undo_redo.add_undo_property(owner, property, before)
+	undo_redo.add_do_method(self, "_changed", owner)
+	undo_redo.add_undo_method(self, "_changed", owner)
 	undo_redo.commit_action()
 
 

@@ -238,8 +238,17 @@ func _draw() -> void:
 	var lanes := model.automation_lanes()
 	for lane in lanes.size():
 		var automation: ChirpAutomation = lanes[lane].automation
-		header.call(model.automation_title(automation),
-			model.automation_y(lane), model.automation_height, AUTOMATION_COLORS[automation.target].lightened(0.3))
+		var owner: int = lanes[lane].owner
+		var top := model.automation_y(lane)
+		if owner >= 0:
+			# An instrument's lane: indented under it, with a bar in the instrument's colour
+			var instrument := event.instruments[owner]
+			draw_rect(Rect2(4, top, 3, model.automation_height), INSTRUMENT_COLORS[instrument.kind])
+			_draw_header_text(font, small, "↳ " + model.automation_title(automation),
+				Rect2(14, top, left - 18, model.automation_height), AUTOMATION_COLORS[automation.target].lightened(0.3))
+		else:
+			header.call("Event · " + model.automation_title(automation), top, model.automation_height,
+				AUTOMATION_COLORS[automation.target].lightened(0.3))
 	if event.instruments.is_empty():
 		_draw_header_text(font, small, "No instruments: right-click to add one",
 			Rect2(8, instruments_top, size.x, model.row_height), text_color.darkened(0.35))
@@ -538,7 +547,16 @@ func _draw_automation_lanes(font: Font, small: int, text_color: Color) -> void:
 		var automation: ChirpAutomation = lanes[lane].automation
 		var color: Color = AUTOMATION_COLORS[automation.target]
 		var top := model.automation_y(lane)
-		draw_rect(Rect2(0, top, size.x, model.automation_height), Color(color, 0.05))
+		var owner: int = lanes[lane].owner
+		if owner >= 0:
+			# Tinted like its instrument, so it reads as part of that row
+			var instrument_color: Color = INSTRUMENT_COLORS[model.event.instruments[owner].kind]
+			draw_rect(Rect2(left, top, size.x - left, model.automation_height), Color(instrument_color, 0.07))
+			draw_rect(Rect2(left, top, 3, model.automation_height), Color(instrument_color, 0.6))
+		else:
+			draw_rect(Rect2(0, top, size.x, model.automation_height), Color(color, 0.05))
+			if lane == 0 or lanes[lane - 1].owner >= 0: # the first event lane: a divider above it
+				draw_line(Vector2(0, top), Vector2(size.x, top), Color(1, 1, 1, 0.25), 1.5)
 		draw_line(Vector2(0, top), Vector2(size.x, top), Color(1, 1, 1, 0.08))
 		var neutral := TimelineModel.automation_neutral(automation) # no change
 		if not is_nan(neutral):

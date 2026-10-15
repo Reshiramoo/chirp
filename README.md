@@ -273,7 +273,9 @@ music.set_timeline_position(12.0)       # seek, in seconds
 ```
 
 **Automation lanes:** volume and pitch can follow the timeline too. In the **Chirp Event** dock,
-**Add → Add Volume Automation** (or Pitch) adds a lane under the instruments: click to add points,
+**Add → Add Volume Automation** (or Pitch) adds a lane for the whole event, below the instruments;
+right-click an instrument → **Add Volume Automation (this instrument)** adds one for that instrument
+alone, right under it (e.g. two layers crossfading). Click to add points,
 drag them (snapping to the grid, Shift to ignore), right-click a point or press Delete to remove it.
 The value follows the playhead through loops and jumps; a fade-in over the intro, a pitch dive
 before a drop.
@@ -303,7 +305,9 @@ engine.set_parameter("RPM", rpm)   # give RPM a seek_speed to glide smoothly bet
 ```
 
 Automation lanes work on parameter sheets too: **Add → Add Volume Automation** draws the event's
-volume (or pitch) along the sheet parameter, e.g. the whole engine getting louder with RPM. These
+volume (or pitch) along the sheet parameter, e.g. the whole engine getting louder with RPM, and an
+instrument's own lanes shape that layer alone. (For a simple crossfade, the instruments' `fade_in`
+/ `fade_out` are enough.) These
 lanes edit the automation's `Curve`, so smooth curves shaped in the inspector show and keep their
 shape.
 
