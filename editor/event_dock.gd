@@ -9,6 +9,7 @@ extends EditorDock
 const TimelineView := preload("timeline_view.gd")
 const TimelineModel := preload("timeline_model.gd")
 const PreviewPanel := preload("preview_panel.gd")
+const WaveformCache := preload("waveform_cache.gd")
 
 const ADD_INSTRUMENT := 100
 const ADD_VOLUME_LANE := 101
@@ -38,6 +39,7 @@ var _context_resource: Resource
 var _needs_fit := false
 var _effect_menu: Array[Dictionary] = [] # the Add menu's effect properties: {index, property, range}
 var _rename_edit: LineEdit
+var _waveforms := WaveformCache.new()
 var _renaming: ChirpMarker
 var _shown_mode := -1 # sheet mode the view was set up for; switching it re-runs edit()
 
@@ -132,6 +134,7 @@ func setup(plugin: EditorPlugin, chirp: Node) -> void:
 	_view.automation_edited.connect(_on_automation_edited)
 	_view.instrument_volume_changed.connect(_on_instrument_volume_changed)
 	_view.audition = chirp
+	_view.waveforms = _waveforms
 
 	var hint := Label.new()
 	hint.text = "Space plays/stops · click an automation lane to add points · drop audio files to add (Shift: as one playlist) · double-click or F2 renames a marker · drag to move · drag edges to resize · Shift: no snap · right-click to add · Del deletes · Ctrl/Cmd+wheel zooms · Shift+wheel scrolls · click the ruler to seek"
@@ -205,6 +208,7 @@ func _process(_delta: float) -> void:
 		edit(_event) # the sheet mode was just switched
 	if model.event == null:
 		return
+	_waveforms.step()
 	if model.is_sheet():
 		model.sheet_definition = _sheet_definition()
 	model.rebuild()
@@ -217,10 +221,13 @@ func _process(_delta: float) -> void:
 		if model.is_sheet():
 			var state := instance._sheet_state()
 			_view.playhead = state.value if state else NAN
+			_view.voice_progress = TimelineModel.sheet_progress(instance)
 		else:
 			_view.playhead = model.timeline.to_units(instance.get_timeline_position())
 	else:
 		_view.playhead = NAN
+	if instance == null or not model.is_sheet():
+		_view.voice_progress = {}
 	_view.queue_redraw()
 
 

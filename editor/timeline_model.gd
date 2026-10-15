@@ -604,6 +604,49 @@ func instrument_span(instrument: ChirpInstrument) -> Vector2:
 	return Vector2(start, timeline.to_units(timeline.to_seconds(start) + seconds))
 
 
+## The stream whose waveform an instrument block shows: a SOUND instrument's first one, else null.
+static func waveform_stream(instrument: ChirpInstrument) -> AudioStream:
+	if instrument == null or instrument.kind != ChirpInstrument.Kind.SOUND:
+		return null
+	for stream in instrument.streams:
+		if stream:
+			return stream
+	return null
+
+
+## Seconds into an instrument's sound heard at [param unit] on the timeline; -1 when silent there.
+## Accounts for start_offset and looping. PARAMETER sheets don't map position to time: there the
+## whole sound is stretched across [param span] (the block's start and end in units).
+func waveform_time(instrument: ChirpInstrument, unit: float, sound_length: float, span: Vector2) -> float:
+	if sound_length <= 0.0 or unit < span.x or unit > span.y:
+		return -1.0
+	if is_sheet():
+		var width := span.y - span.x
+		return 0.0 if width <= 0.0 else (unit - span.x) / width * sound_length
+	var seconds := unit - span.x
+	if timeline:
+		seconds = timeline.to_seconds(unit) - timeline.to_seconds(span.x)
+	seconds += instrument.start_offset
+	if instrument.loop:
+		return fposmod(seconds, sound_length)
+	return seconds if seconds <= sound_length else -1.0
+
+
+## PARAMETER sheets: instrument index -> how far (0..1) each sounding layer of [param instance] is
+## through its sound, for the progress lines in the blocks.
+static func sheet_progress(instance: ChirpEventInstance) -> Dictionary:
+	var progress := {}
+	for index: int in instance._entry_voices:
+		var voice: ChirpEventInstance.Voice = instance._entry_voices[index]
+		if voice == null or voice.player == null or not is_instance_valid(voice.player):
+			continue
+		var stream: AudioStream = voice.player.stream
+		if stream == null or stream.get_length() <= 0.0:
+			continue
+		progress[index] = voice.player.get_playback_position() / stream.get_length()
+	return progress
+
+
 ## Mute, solo and volume knob in instrument row [param row]'s header: {mute, solo, knob} rects.
 func header_controls(row: int) -> Dictionary:
 	var size := row_height - 10.0

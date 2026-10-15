@@ -77,6 +77,10 @@ var audition: Object
 var _knob_drag := {} # {instrument, before, start_y, start_db}
 var _drop_plan := {} # what the files being dragged over would do, for the preview
 var _panning := false
+## Something with get_peaks(stream) (the dock's WaveformCache) for waveforms in blocks. Optional.
+var waveforms: Object
+## PARAMETER sheets: instrument index -> how far (0..1) through its sound the preview is.
+var voice_progress := {}
 
 
 func _init() -> void:
@@ -182,6 +186,7 @@ func _draw() -> void:
 		draw_rect(Rect2(rect.position, Vector2(3, rect.size.y)), color)
 		if instrument.length <= 0.0 and span.y != INF:
 			draw_dashed_line(Vector2(x1, rect.position.y), Vector2(x1, rect.end.y), color, 1.0, 3.0)
+		_draw_waveform(i, instrument, span, rect, color)
 		if model.is_sheet():
 			_draw_fades(instrument, rect, color)
 		if instrument == selected:
@@ -608,6 +613,45 @@ func _apply(resource: Resource, values: Dictionary) -> void:
 	for property: String in values:
 		resource.set(property, values[property])
 	queue_redraw()
+
+
+## The instrument's sound drawn into its block, one peak per pixel column, plus the preview's
+## progress through it on PARAMETER sheets.
+func _draw_waveform(index: int, instrument: ChirpInstrument, span: Vector2, rect: Rect2, color: Color) -> void:
+	var stream := TimelineModel.waveform_stream(instrument)
+	if waveforms == null or stream == null:
+		return
+	var peaks: PackedFloat32Array = waveforms.get_peaks(stream)
+	var length := stream.get_length()
+	if peaks.is_empty() or length <= 0.0:
+		return
+	var per_second := peaks.size() / length
+	var middle := rect.get_center().y
+	var half := rect.size.y * 0.42
+	var x_from := int(maxf(rect.position.x, model.header_width))
+	var x_to := int(minf(rect.end.x, size.x))
+	if span.y == INF:
+		span.y = model.x_to_unit(x_to)
+	var lines := PackedVector2Array()
+	for x in range(x_from, x_to):
+		var t0 := model.waveform_time(instrument, model.x_to_unit(x), length, span)
+		if t0 < 0.0:
+			continue
+		var t1 := model.waveform_time(instrument, model.x_to_unit(x + 1), length, span)
+		var first := clampi(int(t0 * per_second), 0, peaks.size() - 1)
+		var last := clampi(int(t1 * per_second), first, peaks.size() - 1) if t1 > t0 else first
+		var peak := 0.0
+		for p in range(first, last + 1):
+			peak = maxf(peak, peaks[p])
+		var height := maxf(peak * half, 0.5)
+		lines.append(Vector2(x + 0.5, middle - height))
+		lines.append(Vector2(x + 0.5, middle + height))
+	if not lines.is_empty():
+		draw_multiline(lines, Color(color.lightened(0.55), 0.55))
+	if model.is_sheet() and voice_progress.has(index):
+		var x := rect.position.x + clampf(voice_progress[index], 0.0, 1.0) * rect.size.x
+		if x >= model.header_width:
+			draw_line(Vector2(x, rect.position.y), Vector2(x, rect.end.y), PLAYHEAD_COLOR.lightened(0.3), 2.0)
 
 
 ## PARAMETER sheets: fade-in / fade-out ramps over an instrument block.
