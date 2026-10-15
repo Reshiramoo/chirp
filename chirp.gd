@@ -48,6 +48,7 @@ func _ready() -> void:
 		set_process(false)
 		return
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	mixer._remove_effect_buses() # left in a saved bus layout by an earlier run
 	_voice_root = Node.new()
 	_voice_root.name = "Voices"
 	add_child(_voice_root)

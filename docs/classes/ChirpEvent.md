@@ -32,6 +32,8 @@ instrument volume × volume [automations](#property-automations) × volume
 | Array[[ChirpAutomation](ChirpAutomation.md)] | [automations](#property-automations) | `[]` |
 | String | [bus](#property-bus) | `""` |
 | float | [cooldown](#property-cooldown) | `0.0` |
+| [EffectScope](#enum-effectscope) | [effect_scope](#property-effect_scope) | `INSTANCE` |
+| Array[AudioEffect] | [effects](#property-effects) | `[]` |
 | [ChirpEnvelope](ChirpEnvelope.md) | [envelope](#property-envelope) | `null` |
 | Array[[ChirpInstrument](ChirpInstrument.md)] | [instruments](#property-instruments) | `[]` |
 | Array[[ChirpMarker](ChirpMarker.md)] | [markers](#property-markers) | `[]` |
@@ -110,6 +112,18 @@ attenuation is switched off for the event's players, while its panning and Doppl
 
 ---
 
+<a id="enum-effectscope"></a>
+### enum EffectScope
+
+Who gets their own copy of [effects](#property-effects).
+
+- **INSTANCE** = `0`: each instance plays through its own effect bus, so EFFECT automation can differ
+  per instance, e.g. one emitter behind a wall is muffled while another isn't.
+- **EVENT** = `1`: all instances of the event share one effect bus (one pool bus however many
+  play). Cheaper; the shared effects follow the most recently processed instance's automation.
+
+---
+
 <a id="enum-stealing"></a>
 ### enum Stealing
 
@@ -153,6 +167,29 @@ Master. Empty: the bus of the sound directory the event is saved in, else Master
 
 Minimum time in seconds between starts of this event (across all its instances). Starting a stopped
 instance sooner is refused; restarting a playing one is not.
+
+---
+
+<a id="property-effect_scope"></a>
+### [EffectScope](#enum-effectscope) effect_scope = `INSTANCE`
+
+Whether each instance gets its own effect bus or all share one. See [EffectScope](#enum-effectscope).
+
+---
+
+<a id="property-effects"></a>
+### Array[AudioEffect] effects = `[]`
+
+Effects the event plays through, in order, e.g. an `AudioEffectLowPassFilter` for occlusion or a
+band-pass and distortion for a radio voice. While an instance plays, it borrows a bus from Chirp's
+effect bus pool (see [ChirpMixer](ChirpMixer.md#method-get_effect_bus_usage)) carrying copies of these
+effects, and that bus feeds the event's [bus](#property-bus), so VCAs, snapshots and pausing work as
+usual. Nested events play into their parent's effects. If the pool is used up, the event plays
+without effects (with a warning).
+
+Automate effect properties with EFFECT [automations](#property-automations); they edit the copies,
+never this resource. Simple filters are cheap; reverbs, chorus, delay and pitch shift are not, so
+put reverb on a shared bus and route events to it instead of adding one per event.
 
 ---
 

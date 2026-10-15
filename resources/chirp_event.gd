@@ -27,6 +27,12 @@ enum Rolloff {
 	CUSTOM, ## rolloff_curve from min_distance (X 0) to max_distance (X 1).
 }
 
+## Who gets their own copy of [member effects].
+enum EffectScope {
+	INSTANCE, ## Each instance plays through its own effect bus (e.g. occlusion per emitter).
+	EVENT, ## All instances share one effect bus (cheaper; e.g. this event always sounds like a radio).
+}
+
 enum Stealing {
 	OLDEST, ## Stop the instance that started first.
 	QUIETEST, ## Stop the instance with the lowest current volume.
@@ -50,6 +56,13 @@ enum Stealing {
 @export var automations: Array[ChirpAutomation] = []
 @export var modulators: Array[ChirpLFO] = []
 @export var envelope: ChirpEnvelope
+
+@export_group("Effects")
+## Effects the event plays through, in order (e.g. AudioEffectLowPassFilter). They run on a bus
+## borrowed from Chirp's pool (see Chirp.mixer), which feeds the event's bus. Automate their
+## properties with EFFECT automations. Keep reverbs on a shared bus instead: they are expensive.
+@export var effects: Array[AudioEffect] = []
+@export var effect_scope := EffectScope.INSTANCE
 
 @export_group("Timeline")
 ## Units for instrument start/length and marker positions on a TIMELINE event.

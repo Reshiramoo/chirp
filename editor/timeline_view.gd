@@ -57,6 +57,8 @@ const DROP_COLOR := Color(0.45, 0.85, 1.0)
 const AUTOMATION_COLORS := {
 	ChirpAutomation.Target.VOLUME: Color(0.98, 0.78, 0.3),
 	ChirpAutomation.Target.PITCH: Color(0.55, 0.9, 0.75),
+	ChirpAutomation.Target.PAN: Color(0.6, 0.75, 1.0),
+	ChirpAutomation.Target.EFFECT: Color(0.95, 0.55, 0.85),
 }
 
 var model := TimelineModel.new()
@@ -234,7 +236,7 @@ func _draw() -> void:
 	var lanes := model.automation_lanes()
 	for lane in lanes.size():
 		var automation: ChirpAutomation = lanes[lane].automation
-		header.call("%s automation" % ChirpAutomation.Target.keys()[automation.target].capitalize(),
+		header.call(model.automation_title(automation),
 			model.automation_y(lane), model.automation_height, AUTOMATION_COLORS[automation.target].lightened(0.3))
 	if event.instruments.is_empty():
 		_draw_header_text(font, small, "No instruments: right-click to add one",
@@ -536,8 +538,10 @@ func _draw_automation_lanes(font: Font, small: int, text_color: Color) -> void:
 		var top := model.automation_y(lane)
 		draw_rect(Rect2(0, top, size.x, model.automation_height), Color(color, 0.05))
 		draw_line(Vector2(0, top), Vector2(size.x, top), Color(1, 1, 1, 0.08))
-		var neutral_y := model.value_to_y(automation, 1.0, lane) # no change
-		draw_dashed_line(Vector2(left, neutral_y), Vector2(size.x, neutral_y), Color(1, 1, 1, 0.12), 1.0, 4.0)
+		var neutral := TimelineModel.automation_neutral(automation) # no change
+		if not is_nan(neutral):
+			var neutral_y := model.value_to_y(automation, neutral, lane)
+			draw_dashed_line(Vector2(left, neutral_y), Vector2(size.x, neutral_y), Color(1, 1, 1, 0.12), 1.0, 4.0)
 		var points := model.lane_points(automation)
 		var line := PackedVector2Array()
 		if automation.source == ChirpAutomation.Source.TIMELINE:

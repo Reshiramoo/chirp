@@ -254,7 +254,7 @@ func automation_y(lane: int) -> float:
 func automation_range(automation: ChirpAutomation) -> Vector2:
 	if automation.source == ChirpAutomation.Source.PARAMETER and automation.curve:
 		return Vector2(automation.curve.min_value, maxf(automation.curve.max_value, automation.curve.min_value + EPSILON))
-	return ChirpAutomation.TIMELINE_RANGE[automation.target]
+	return automation.lane_range()
 
 
 func value_to_y(automation: ChirpAutomation, value: float, lane: int) -> float:
@@ -355,10 +355,52 @@ static func automation_move(points: PackedVector2Array, index: int, unit: float,
 	return automation_insert(result, unit, value)
 
 
-## A display string for a lane value: dB for volume, a multiplier for pitch.
+## A lane's name: "Volume", "Pitch", "Pan", or the effect and property ("LowPassFilter cutoff_hz").
+func automation_title(automation: ChirpAutomation) -> String:
+	if automation.target != ChirpAutomation.Target.EFFECT:
+		return ChirpAutomation.Target.keys()[automation.target].capitalize()
+	var effect: AudioEffect = event.effects[automation.effect_index] \
+		if automation.effect_index >= 0 and automation.effect_index < event.effects.size() else null
+	var kind := effect.get_class().trim_prefix("AudioEffect") if effect else "(no effect %d)" % (automation.effect_index + 1)
+	return "%s %s" % [kind, automation.effect_property if automation.effect_property else "(no property)"]
+
+
+## The value meaning "no change", drawn as a dashed line: 1 for volume and pitch, 0 for pan; NAN for effects.
+static func automation_neutral(automation: ChirpAutomation) -> float:
+	match automation.target:
+		ChirpAutomation.Target.PAN:
+			return 0.0
+		ChirpAutomation.Target.EFFECT:
+			return NAN
+	return 1.0
+
+
+## Numeric properties of [param effect] with a range, for effect automation menus: [{name, range}].
+static func effect_properties(effect: AudioEffect) -> Array[Dictionary]:
+	var found: Array[Dictionary] = []
+	if effect == null:
+		return found
+	for info in effect.get_property_list():
+		if info.usage & PROPERTY_USAGE_EDITOR == 0 or info.type not in [TYPE_FLOAT, TYPE_INT] \
+				or info.hint != PROPERTY_HINT_RANGE:
+			continue
+		var parts: PackedStringArray = info.hint_string.split(",")
+		if parts.size() >= 2 and parts[0].is_valid_float() and parts[1].is_valid_float():
+			found.append({name = info.name, range = Vector2(parts[0].to_float(), parts[1].to_float())})
+	return found
+
+
+## A display string for a lane value: dB for volume, a multiplier for pitch, L/R for pan.
 static func automation_text(automation: ChirpAutomation, value: float) -> String:
-	if automation.target == ChirpAutomation.Target.PITCH:
-		return "×%.2f" % value
+	match automation.target:
+		ChirpAutomation.Target.PITCH:
+			return "×%.2f" % value
+		ChirpAutomation.Target.PAN:
+			if absf(value) < 0.005:
+				return "C"
+			return "%s %d%%" % ["L" if value < 0.0 else "R", roundi(absf(value) * 100.0)]
+		ChirpAutomation.Target.EFFECT:
+			return _number(value)
 	return "-∞ dB" if value <= 0.00001 else "%.1f dB" % linear_to_db(value)
 
 

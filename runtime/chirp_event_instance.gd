@@ -61,6 +61,10 @@ var _velocity: Variant = null # Vector2 or Vector3, from position changes
 var _lfo_seed := 0
 var _has_built_ins := false
 var _programmer_sounds := {} # programmer key -> AudioStream; shared with nested instances
+var _send_to: StringName # where the output goes: the event's bus, or a parent event's output
+var _fx_bus: StringName = &"" # pool bus carrying the event's effects while playing
+var _fx_effects: Array[AudioEffect] = [] # the effects on _fx_bus (this instance's, or the event's shared ones)
+var _panner: AudioEffectPanner # appended to the effects when the event has PAN automation
 
 # Timeline playback (TIMELINE events only)
 var _timeline: Timeline
@@ -106,6 +110,7 @@ func _init(chirp: Node, event: ChirpEvent, bus: StringName) -> void:
 	_chirp = chirp
 	_event = event
 	_bus = bus
+	_send_to = bus
 	for definition in event.parameters:
 		if definition:
 			_params[definition.name.to_lower()] = ChirpParameter.State.new(definition)
@@ -145,6 +150,8 @@ func start() -> void:
 	_env_level = _event.envelope.level_at(0.0) if _event.envelope else 1.0
 	_state = State.PLAYING
 	_chirp.events._register_start(self)
+	if _fx_bus.is_empty() and _needs_effects():
+		_acquire_effects()
 	if _has_built_ins:
 		_update_built_ins()
 	match _event.sheet_mode:
@@ -350,6 +357,8 @@ func _process(delta: float) -> void:
 	elif _event.envelope:
 		_env_level = _event.envelope.level_at(_time)
 
+	if not _fx_effects.is_empty():
+		_apply_effect_automation()
 	var volume_factor := _automation(ChirpAutomation.Target.VOLUME)
 	var pitch_factor := _automation(ChirpAutomation.Target.PITCH)
 	for voice in _voices:
@@ -727,7 +736,7 @@ func _new_player(stream: AudioStream) -> Node:
 		_:
 			player = AudioStreamPlayer.new()
 	player.stream = stream
-	player.bus = _bus
+	player.bus = _output_bus()
 	_chirp._voice_root.add_child(player)
 	return player
 
@@ -827,6 +836,7 @@ func _start_child(voice: Voice, offset: float) -> bool:
 	elif _position != null:
 		child.set_position(_position)
 	child._attenuation = _attenuation
+	child._send_to = _output_bus() # nested events play into this event's effects
 	child._programmer_sounds = _programmer_sounds
 	child.programmer_sound_requested.connect(programmer_sound_requested.emit)
 	voice.child = child
@@ -1089,6 +1099,104 @@ func _update_built_ins() -> void:
 		state.set_target(value, true)
 
 
+# --- effects --------------------------------------------------------------------------
+
+## Where players (and nested events) send their audio: the effect bus, else _send_to.
+func _output_bus() -> StringName:
+	return _fx_bus if not _fx_bus.is_empty() else _send_to
+
+
+func _needs_effects() -> bool:
+	return not _event.effects.is_empty() or _has_automation(ChirpAutomation.Target.PAN)
+
+
+func _has_automation(target: ChirpAutomation.Target) -> bool:
+	for automation in _event.automations:
+		if automation and automation.target == target:
+			return true
+	return false
+
+
+## Copies of the event's effects (so automation never edits the resource), plus a panner if needed.
+func _make_effects() -> Array[AudioEffect]:
+	var effects: Array[AudioEffect] = []
+	for effect in _event.effects:
+		# An empty slot becomes a 0 dB amplify, so effect indices keep matching ChirpEvent.effects.
+		effects.append(effect.duplicate() if effect else AudioEffectAmplify.new())
+	if _has_automation(ChirpAutomation.Target.PAN):
+		effects.append(AudioEffectPanner.new())
+	return effects
+
+
+func _acquire_effects() -> void:
+	if _event.effect_scope == ChirpEvent.EffectScope.EVENT:
+		var shared: Dictionary = _chirp.mixer._acquire_event_effects(_event, _send_to, _make_effects)
+		if shared.is_empty():
+			return
+		_fx_bus = shared.bus
+		_fx_effects = shared.effects
+	else:
+		var effects := _make_effects()
+		_fx_bus = _chirp.mixer._acquire_effect_bus(_send_to, effects)
+		if _fx_bus.is_empty():
+			return
+		_fx_effects = effects
+	_panner = _fx_effects[-1] as AudioEffectPanner if not _fx_effects.is_empty() else null
+	_apply_effect_automation()
+
+
+func _release_effects() -> void:
+	if _fx_bus.is_empty():
+		return
+	if _event.effect_scope == ChirpEvent.EffectScope.EVENT:
+		_chirp.mixer._release_event_effects(_event)
+	else:
+		_chirp.mixer._release_effect_bus(_fx_bus)
+	_fx_bus = &""
+	_fx_effects = []
+	_panner = null
+
+
+## PAN and EFFECT automations set their property on this instance's effects.
+func _apply_effect_automation() -> void:
+	for automation in _event.automations:
+		if automation == null or automation.target < ChirpAutomation.Target.PAN:
+			continue
+		var value: Variant = _automation_value(automation)
+		if value == null:
+			continue
+		if automation.target == ChirpAutomation.Target.PAN:
+			if _panner:
+				_panner.pan = clampf(value, -1.0, 1.0)
+		elif automation.effect_index >= 0 and automation.effect_index < _event.effects.size():
+			var effect := _fx_effects[automation.effect_index] if automation.effect_index < _fx_effects.size() else null
+			if effect and not automation.effect_property.is_empty():
+				var current: Variant = effect.get(automation.effect_property)
+				if current is int:
+					effect.set(automation.effect_property, roundi(value))
+				elif current is float:
+					effect.set(automation.effect_property, value)
+				else:
+					_chirp._warn_once("fxprop:%s:%s" % [_event.resource_path, automation.effect_property],
+						"Chirp: %s has no numeric property '%s'." % [effect.get_class(), automation.effect_property])
+
+
+## The raw value an automation gives right now, or null when it has nothing to give.
+func _automation_value(automation: ChirpAutomation) -> Variant:
+	if automation.source == ChirpAutomation.Source.TIMELINE:
+		if _timeline == null or automation.points.is_empty():
+			return null
+		return automation.value_at(_timeline.to_units(_playhead))
+	var state: ChirpParameter.State
+	if automation.global:
+		state = _chirp.parameters._get_state(automation.parameter)
+	else:
+		state = _params.get(automation.parameter.to_lower())
+	if state == null or automation.curve == null:
+		return null
+	return automation.evaluate(state.def, state.value)
+
+
 # --- lifecycle ---------------------------------------------------------------------
 
 func _sync_pause() -> void:
@@ -1109,6 +1217,7 @@ func _sync_pause() -> void:
 func _finish_stop() -> void:
 	_clear_voices()
 	_pending.clear()
+	_release_effects()
 	if _timeline:
 		_reset_timeline_pass()
 	_entry_done.clear()

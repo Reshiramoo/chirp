@@ -13,6 +13,8 @@ const PreviewPanel := preload("preview_panel.gd")
 const ADD_INSTRUMENT := 100
 const ADD_VOLUME_LANE := 101
 const ADD_PITCH_LANE := 102
+const ADD_PAN_LANE := 103
+const ADD_EFFECT_LANE := 1000 # + an index into _effect_menu
 const DELETE := 200
 const INSPECT := 201
 const RENAME := 202
@@ -32,6 +34,7 @@ var _context := PopupMenu.new()
 var _context_unit := 0.0
 var _context_resource: Resource
 var _needs_fit := false
+var _effect_menu: Array[Dictionary] = [] # the Add menu's effect properties: {index, property, range}
 var _rename_edit: LineEdit
 var _renaming: ChirpMarker
 var _shown_mode := -1 # sheet mode the view was set up for; switching it re-runs edit()
@@ -270,6 +273,14 @@ func _fill_add_menu(menu: PopupMenu) -> void:
 	if _view and _view.model.event:
 		menu.add_icon_item(_icon("Curve"), "Add Volume Automation", ADD_VOLUME_LANE)
 		menu.add_icon_item(_icon("Curve"), "Add Pitch Automation", ADD_PITCH_LANE)
+		menu.add_icon_item(_icon("Curve"), "Add Pan Automation", ADD_PAN_LANE)
+		_effect_menu.clear()
+		var effects: Array[AudioEffect] = _view.model.event.effects
+		for i in effects.size():
+			for property in TimelineModel.effect_properties(effects[i]):
+				_effect_menu.append({index = i, property = property.name, range = property.range})
+				menu.add_icon_item(_icon("Curve"), "Add Effect Automation: %d %s %s" % [i + 1,
+					effects[i].get_class().trim_prefix("AudioEffect"), property.name], ADD_EFFECT_LANE + _effect_menu.size() - 1)
 	if _view and _view.model.is_sheet():
 		return # parameter sheets have no markers
 	menu.add_separator("Add Marker")
@@ -289,22 +300,6 @@ func _on_add(id: int, unit: float) -> void:
 			_on_item_selected(_context_resource)
 		DELETE_POINT:
 			_view.delete_selected_point()
-		ADD_VOLUME_LANE, ADD_PITCH_LANE:
-			var automation := ChirpAutomation.new()
-			automation.target = ChirpAutomation.Target.VOLUME if id == ADD_VOLUME_LANE else ChirpAutomation.Target.PITCH
-			if model.is_sheet():
-				# A curve along the sheet parameter, with room above 1 for pitch.
-				automation.parameter = _event.sheet_parameter
-				automation.global = _event.find_parameter(_event.sheet_parameter) == null
-				var span: Vector2 = ChirpAutomation.TIMELINE_RANGE[automation.target]
-				automation.curve = Curve.new()
-				automation.curve.min_value = span.x
-				automation.curve.max_value = span.y
-				model.lane_insert(automation, at, 1.0)
-			else:
-				automation.source = ChirpAutomation.Source.TIMELINE
-				automation.points = PackedVector2Array([Vector2(at, 1.0)])
-			_add_to("automations", automation, "Add %s Automation" % ("Volume" if id == ADD_VOLUME_LANE else "Pitch"))
 		RENAME:
 			var index := _event.markers.find(_context_resource)
 			if index >= 0:
@@ -314,15 +309,63 @@ func _on_add(id: int, unit: float) -> void:
 			instrument.start = at
 			instrument.length = model.bar_length_at(at)
 			_add_to("instruments", instrument, "Add Instrument")
+		ADD_VOLUME_LANE, ADD_PITCH_LANE, ADD_PAN_LANE:
+			_add_lane(id, at)
 		_:
-			var marker := ChirpMarker.new()
-			marker.kind = id
-			marker.position = at
-			if marker.is_region():
-				marker.end = at + model.bar_length_at(at) * 2.0
-			if marker.kind == ChirpMarker.Kind.MARKER or marker.kind == ChirpMarker.Kind.DESTINATION:
-				marker.name = "%s %d" % ["marker" if marker.kind == ChirpMarker.Kind.MARKER else "destination", _event.markers.size() + 1]
-			_add_to("markers", marker, "Add %s" % ChirpMarker.Kind.keys()[id].capitalize())
+			if id >= ADD_EFFECT_LANE:
+				if id - ADD_EFFECT_LANE < _effect_menu.size():
+					_add_lane(id, at)
+			else:
+				_add_marker(id, at)
+
+
+## Adds an automation lane (volume, pitch, pan, or an effect property from the Add menu) with one
+## point at [param at], at the property's current value.
+func _add_lane(id: int, at: float) -> void:
+	var model := _view.model
+	var automation := ChirpAutomation.new()
+	var start_value := 1.0
+	match id:
+		ADD_VOLUME_LANE:
+			automation.target = ChirpAutomation.Target.VOLUME
+		ADD_PITCH_LANE:
+			automation.target = ChirpAutomation.Target.PITCH
+		ADD_PAN_LANE:
+			automation.target = ChirpAutomation.Target.PAN
+			start_value = 0.0
+		_:
+			var item: Dictionary = _effect_menu[id - ADD_EFFECT_LANE]
+			automation.target = ChirpAutomation.Target.EFFECT
+			automation.effect_index = item.index
+			automation.effect_property = item.property
+			automation.value_range = item.range
+			start_value = float(_event.effects[item.index].get(item.property))
+	var span := automation.lane_range()
+	start_value = clampf(start_value, span.x, span.y)
+	if model.is_sheet():
+		# A curve along the sheet parameter, spanning the property's range.
+		automation.parameter = _event.sheet_parameter
+		automation.global = _event.find_parameter(_event.sheet_parameter) == null
+		automation.curve = Curve.new()
+		automation.curve.min_value = span.x
+		automation.curve.max_value = span.y
+		model.lane_insert(automation, at, start_value)
+	else:
+		automation.source = ChirpAutomation.Source.TIMELINE
+		automation.points = PackedVector2Array([Vector2(at, start_value)])
+	_add_to("automations", automation, "Add %s Automation" % model.automation_title(automation))
+
+
+func _add_marker(kind: int, at: float) -> void:
+	var model := _view.model
+	var marker := ChirpMarker.new()
+	marker.kind = kind
+	marker.position = at
+	if marker.is_region():
+		marker.end = at + model.bar_length_at(at) * 2.0
+	if marker.kind == ChirpMarker.Kind.MARKER or marker.kind == ChirpMarker.Kind.DESTINATION:
+		marker.name = "%s %d" % ["marker" if marker.kind == ChirpMarker.Kind.MARKER else "destination", _event.markers.size() + 1]
+	_add_to("markers", marker, "Add %s" % ChirpMarker.Kind.keys()[kind].capitalize())
 
 
 ## Applies a TimelineModel.plan_drop() result as one undoable action.

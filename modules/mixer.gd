@@ -6,8 +6,15 @@ extends RefCounted
 ## Every frame, each bus Chirp manages is recomputed as:
 ## base volume × VCAs × bus automation, then snapshots blended in by priority.
 ## Effect properties work the same way, starting from the value they had when first touched.
+##
+## Events with effects play through buses from a small pool ("Chirp FX 1", ...), created the first
+## time one is needed ("chirp/effect_bus_pool_size" of them) and lent to instances while they play.
 
 const BUS_PREFIX := "bus:/"
+## Names of the pool's effect buses start with this.
+const EFFECT_BUS_PREFIX := "Chirp FX "
+const SETTING_EFFECT_POOL := "chirp/effect_bus_pool_size"
+const DEFAULT_EFFECT_POOL := 8
 
 var _chirp: Node
 var _vcas: Array[ChirpVCA] = []
@@ -24,6 +31,10 @@ var _paused_buses := {} # Godot bus name -> true
 var _all_paused := false
 var _background_paused := false
 var _live := true # false: compute nothing, write nothing (editor preview while idle)
+var _fx_created := false
+var _fx_free: Array[StringName] = [] # pool buses not lent out
+var _fx_lent := {} # pool bus -> true
+var _event_fx := {} # ChirpEvent instance id -> {bus, effects, count}: EVENT-scope sharing
 
 
 func _init(chirp: Node) -> void:
@@ -153,11 +164,17 @@ func set_live(live: bool) -> void:
 		_recapture()
 	else:
 		_restore()
+		_remove_effect_buses() # so the editor's bus layout is left as it was
 		_live = false
 
 
 func is_live() -> bool:
 	return _live
+
+
+## Pool effect buses currently lent to events, and the pool's size (0 before first use).
+func get_effect_bus_usage() -> Vector2i:
+	return Vector2i(_fx_lent.size(), _fx_lent.size() + _fx_free.size())
 
 
 # --- internals ---------------------------------------------------------------------
@@ -344,6 +361,91 @@ func _get_effect(bus: StringName, effect_index: int) -> AudioEffect:
 	if index == -1 or effect_index < 0 or effect_index >= AudioServer.get_bus_effect_count(index):
 		return null
 	return AudioServer.get_bus_effect(index, effect_index)
+
+
+# --- effect bus pool ------------------------------------------------------------------
+
+## Lends a pool bus carrying [param effects] and sending into [param send_to]; &"" when the pool
+## is used up (the caller plays without effects).
+func _acquire_effect_bus(send_to: StringName, effects: Array[AudioEffect]) -> StringName:
+	if not _fx_created:
+		_create_effect_buses()
+	if _fx_free.is_empty():
+		_chirp._warn_once("fx_pool", "Chirp: all %d effect buses are in use; playing without effects. Raise the \"%s\" project setting." \
+			% [_fx_lent.size(), SETTING_EFFECT_POOL])
+		return &""
+	var bus: StringName = _fx_free.pop_back()
+	_fx_lent[bus] = true
+	var index := AudioServer.get_bus_index(bus)
+	_clear_effects(index)
+	for effect in effects:
+		AudioServer.add_bus_effect(index, effect)
+	AudioServer.set_bus_send(index, send_to)
+	AudioServer.set_bus_volume_db(index, 0.0)
+	AudioServer.set_bus_mute(index, false)
+	AudioServer.set_bus_bypass_effects(index, false)
+	return bus
+
+
+func _release_effect_bus(bus: StringName) -> void:
+	if not _fx_lent.has(bus):
+		return
+	_fx_lent.erase(bus)
+	var index := AudioServer.get_bus_index(bus)
+	if index != -1:
+		_clear_effects(index)
+		_fx_free.append(bus)
+
+
+## EVENT scope: the bus and effects shared by every instance of [param event], lent on first use.
+## [param make_effects] builds the effect copies. Returns {bus, effects}, or {} when the pool is used up.
+func _acquire_event_effects(event: ChirpEvent, send_to: StringName, make_effects: Callable) -> Dictionary:
+	var key := event.get_instance_id()
+	if _event_fx.has(key):
+		_event_fx[key].count += 1
+		return _event_fx[key]
+	var effects: Array[AudioEffect] = make_effects.call()
+	var bus := _acquire_effect_bus(send_to, effects)
+	if bus.is_empty():
+		return {}
+	_event_fx[key] = {bus = bus, effects = effects, count = 1}
+	return _event_fx[key]
+
+
+func _release_event_effects(event: ChirpEvent) -> void:
+	var key := event.get_instance_id()
+	if not _event_fx.has(key):
+		return
+	_event_fx[key].count -= 1
+	if _event_fx[key].count <= 0:
+		_release_effect_bus(_event_fx[key].bus)
+		_event_fx.erase(key)
+
+
+func _create_effect_buses() -> void:
+	_fx_created = true
+	var size: int = ProjectSettings.get_setting(SETTING_EFFECT_POOL, DEFAULT_EFFECT_POOL)
+	for i in size:
+		AudioServer.add_bus()
+		var bus := StringName(EFFECT_BUS_PREFIX + str(i + 1))
+		AudioServer.set_bus_name(AudioServer.bus_count - 1, bus)
+		_fx_free.append(bus)
+
+
+## Removes the pool's buses (and any left in a saved bus layout by an earlier run).
+func _remove_effect_buses() -> void:
+	for index in range(AudioServer.bus_count - 1, 0, -1):
+		if AudioServer.get_bus_name(index).begins_with(EFFECT_BUS_PREFIX):
+			AudioServer.remove_bus(index)
+	_fx_created = false
+	_fx_free.clear()
+	_fx_lent.clear()
+	_event_fx.clear()
+
+
+static func _clear_effects(index: int) -> void:
+	for i in range(AudioServer.get_bus_effect_count(index) - 1, -1, -1):
+		AudioServer.remove_bus_effect(index, i)
 
 
 func _find_snapshot(snapshot_or_name: Variant) -> ChirpSnapshot:

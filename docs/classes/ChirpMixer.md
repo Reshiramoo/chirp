@@ -18,6 +18,12 @@ a snapshot first touches it; its volume at that moment becomes its base. Effect 
 the same way, starting from the value they had when first touched. Buses Chirp never touches are
 left alone.
 
+**Effect bus pool.** Events with [effects](ChirpEvent.md#property-effects) play through buses from a
+pool: `chirp/effect_bus_pool_size` buses (default 8) named "Chirp FX 1", "Chirp FX 2"…, appended to
+the bus layout the first time an event needs one and lent to instances while they play. Silent pool
+buses cost nothing. Buses with those names left in a saved layout are removed when Chirp starts, and
+the editor preview removes its pool when it goes idle.
+
 ## Tutorials
 
 - [Mixing](../../README.md#mixing)
@@ -28,6 +34,7 @@ left alone.
 |---|---|
 | Array[[ChirpSnapshotInstance](ChirpSnapshotInstance.md)] | [get_active_snapshots](#method-get_active_snapshots)() |
 | float | [get_bus_volume](#method-get_bus_volume)(bus_path: String) |
+| Vector2i | [get_effect_bus_usage](#method-get_effect_bus_usage)() |
 | float | [get_vca_volume](#method-get_vca_volume)(vca_name: String) |
 | bool | [is_live](#method-is_live)() |
 | void | [mute_all](#method-mute_all)(mute: bool) |
@@ -45,6 +52,9 @@ left alone.
 ## Constants
 
 - **BUS_PREFIX** = `"bus:/"`
+- **EFFECT_BUS_PREFIX** = `"Chirp FX "`: names of the pool's effect buses start with this.
+- **SETTING_EFFECT_POOL** = `"chirp/effect_bus_pool_size"`: project setting, the pool's size.
+- **DEFAULT_EFFECT_POOL** = `8`
 
 ## Method Descriptions
 
@@ -60,6 +70,15 @@ Snapshots that are playing or fading out, in the order they started.
 
 Linear volume set with [set_bus_volume()](#method-set_bus_volume), not counting VCAs, automation
 or snapshots. For a bus Chirp doesn't manage, the AudioServer's current volume.
+
+---
+
+<a id="method-get_effect_bus_usage"></a>
+### Vector2i get_effect_bus_usage()
+
+Effect buses lent out (x) and the pool's size (y, 0 until an event first needs one). When x reaches
+y, further events with effects play without them until a bus is returned; raise
+`chirp/effect_bus_pool_size` if that happens.
 
 ---
 

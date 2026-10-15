@@ -32,6 +32,8 @@ func _enter_tree() -> void:
 	_add_setting(ChirpScript.SETTING_CONFIG, ChirpScript.DEFAULT_CONFIG,
 		TYPE_STRING, PROPERTY_HINT_FILE, "*.tres,*.res")
 	_add_setting(ChirpScript.SETTING_PAUSE_IN_BACKGROUND, true, TYPE_BOOL)
+	_add_setting(ChirpScript.Mixer.SETTING_EFFECT_POOL, ChirpScript.Mixer.DEFAULT_EFFECT_POOL,
+		TYPE_INT, PROPERTY_HINT_RANGE, "0,64")
 
 	_preview_chirp = ChirpScript.new()
 	_preview_chirp.preview = true

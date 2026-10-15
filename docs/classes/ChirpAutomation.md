@@ -2,13 +2,16 @@
 
 **Inherits:** [Resource](https://docs.godotengine.org/en/stable/classes/class_resource.html)
 
-Drives an event's volume or pitch from a parameter, or along its timeline.
+Drives an event's volume, pitch, pan or an effect property from a parameter, or along its timeline.
 
 ## Description
 
 Add to [ChirpEvent.automations](ChirpEvent.md#property-automations). Every frame the automation gives
-a multiplier for its [target](#property-target): linear gain for VOLUME, pitch scale for PITCH.
-Several automations on the same target multiply.
+a value for its [target](#property-target). VOLUME (linear gain) and PITCH (pitch scale) are
+multipliers, and several automations on them multiply. PAN (-1 left to 1 right) and EFFECT (the
+effect property's own value, e.g. a cutoff in Hz) set the value; with several on the same property,
+the last one wins. PAN and EFFECT act on the event's effect bus (see
+[ChirpEvent.effects](ChirpEvent.md#property-effects)); for PAN, Chirp adds a panner to it.
 
 **PARAMETER source** (the default): the parameter's position in its range is looked up on the
 [curve](#property-curve). The curve's X axis spans the parameter's range (its `min_domain` = the
@@ -54,17 +57,21 @@ music_event.automations.append(fade_in)
 | Type | Name | Default |
 |---|---|---|
 | Curve | [curve](#property-curve) | `null` |
+| int | [effect_index](#property-effect_index) | `0` |
+| String | [effect_property](#property-effect_property) | `""` |
 | bool | [global](#property-global) | `false` |
 | String | [parameter](#property-parameter) | `""` |
 | PackedVector2Array | [points](#property-points) | `PackedVector2Array()` |
 | [Source](#enum-source) | [source](#property-source) | `PARAMETER` |
 | [Target](#enum-target) | [target](#property-target) | `VOLUME` |
+| Vector2 | [value_range](#property-value_range) | `Vector2(0, 1)` |
 
 ## Methods
 
 | Return | Signature |
 |---|---|
 | float | [evaluate](#method-evaluate)(definition: [ChirpParameter](ChirpParameter.md), value: float) |
+| Vector2 | [lane_range](#method-lane_range)() |
 | float | [sample_curve](#method-sample_curve)(curve: Curve, definition: [ChirpParameter](ChirpParameter.md), value: float) static |
 | float | [value_at](#method-value_at)(position: float) |
 
@@ -73,8 +80,12 @@ music_event.automations.append(fade_in)
 <a id="enum-target"></a>
 ### enum Target
 
-- **VOLUME** = `0`: the value is a linear gain.
-- **PITCH** = `1`: the value is a pitch scale (2.0 = an octave up).
+- **VOLUME** = `0`: the value is a linear gain multiplier.
+- **PITCH** = `1`: the value is a pitch scale multiplier (2.0 = an octave up).
+- **PAN** = `2`: the value is the stereo pan, -1 (left) to 1 (right). Chirp adds an
+  `AudioEffectPanner` to the event's effect bus.
+- **EFFECT** = `3`: the value is set on [effect_property](#property-effect_property) of the event's
+  effect number [effect_index](#property-effect_index).
 
 ---
 
@@ -86,8 +97,8 @@ music_event.automations.append(fade_in)
 
 ## Constants
 
-- **TIMELINE_RANGE** = `{VOLUME: Vector2(0, 1), PITCH: Vector2(0.5, 2)}`: the value range the
-  dock's automation lanes edit within, per target.
+- **TIMELINE_RANGE** = `{VOLUME: Vector2(0, 1), PITCH: Vector2(0.5, 2), PAN: Vector2(-1, 1)}`: the
+  value range timeline lanes edit within, per target (EFFECT lanes use [value_range](#property-value_range)).
 
 ## Property Descriptions
 
@@ -95,6 +106,21 @@ music_event.automations.append(fade_in)
 ### Curve curve = `null`
 
 PARAMETER: the mapping. Without a curve, the automation has no effect.
+
+---
+
+<a id="property-effect_index"></a>
+### int effect_index = `0`
+
+EFFECT: which of the event's effects, by its position in [ChirpEvent.effects](ChirpEvent.md#property-effects).
+
+---
+
+<a id="property-effect_property"></a>
+### String effect_property = `""`
+
+EFFECT: the numeric property to set, e.g. `"cutoff_hz"` on `AudioEffectLowPassFilter`. Integer
+properties are rounded.
 
 ---
 
@@ -133,12 +159,29 @@ What drives the value. See [Source](#enum-source). The inspector shows the field
 
 What the value drives. See [Target](#enum-target).
 
+---
+
+<a id="property-value_range"></a>
+### Vector2 value_range = `Vector2(0, 1)`
+
+EFFECT on a timeline: the range its lane edits within. The dock's **Add → Add Effect Automation**
+fills it in from the property's range in Godot (e.g. 1..20500 for a cutoff). On parameter sheets,
+the curve's `min_value` / `max_value` play this role.
+
 ## Method Descriptions
 
 <a id="method-evaluate"></a>
 ### float evaluate(definition: [ChirpParameter](ChirpParameter.md), value: float)
 
 PARAMETER: the multiplier for `value` of the parameter `definition`: `sample_curve(curve, definition, value)`.
+
+---
+
+<a id="method-lane_range"></a>
+### Vector2 lane_range()
+
+The value range a timeline lane edits within: [value_range](#property-value_range) for EFFECT, else
+[TIMELINE_RANGE](#constants) for the target.
 
 ---
 

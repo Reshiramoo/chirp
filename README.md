@@ -28,6 +28,7 @@ No native libraries, so it runs anywhere Godot does (desktop, Android, iOS, web)
 - [Parameter sheets](#parameter-sheets)
 - [Listeners and roll-off](#listeners-and-roll-off)
 - [Mixing](#mixing)
+  - [Effects per event](#effects-per-event)
 - [Emitter nodes](#emitter-nodes)
   - [Parameter triggers](#parameter-triggers)
 - [Editor tools](#editor-tools)
@@ -51,6 +52,7 @@ No native libraries, so it runs anywhere Godot does (desktop, Android, iOS, web)
    | `chirp/sound_directories` | `Dictionary[String, String]` | `{"res://audio": ""}` | Folders to find sounds in, each mapped to a bus path (`""` = Master). |
    | `chirp/config` | `String` | `"res://audio/chirp_config.tres"` | Optional [ChirpConfig](docs/classes/ChirpConfig.md) holding global parameters, VCAs, snapshots and bus automation. |
    | `chirp/pause_on_app_background` | `bool` | `true` | Pause every event while a mobile app is in the background. |
+   | `chirp/effect_bus_pool_size` | `int` | `8` | Buses lent to events with effects (see [Effects per event](#effects-per-event)). |
 
    For example, for sounds in `res://assets/sounds/bgms` and `res://assets/sounds/sfxs`:
    ```
@@ -111,7 +113,8 @@ A ChirpEvent is a list of [ChirpInstrument](docs/classes/ChirpInstrument.md)s pl
 | `persistent` | Keep playing after the content ends, until stopped. |
 | `bus` | Bus path; empty = its sound directory's bus. |
 | `parameters` | Local [ChirpParameter](docs/classes/ChirpParameter.md)s: continuous, discrete or labeled, with optional seek speed. Or built-in. |
-| `automations` | [ChirpAutomation](docs/classes/ChirpAutomation.md): parameter → volume or pitch through a `Curve`, or volume/pitch drawn along a timeline. |
+| `automations` | [ChirpAutomation](docs/classes/ChirpAutomation.md): volume, pitch, pan or an effect property, from a parameter through a `Curve` or drawn along a timeline. |
+| `effects` / `effect_scope` | Effects the event plays through, per instance or shared (see [Effects per event](#effects-per-event)). |
 | `modulators` | [ChirpLFO](docs/classes/ChirpLFO.md): sine, triangle, square, saw or random waves on volume or pitch. |
 | `envelope` | [ChirpEnvelope](docs/classes/ChirpEnvelope.md) (AHDSR). `release` is the fade-out used by `stop()`. |
 | `max_instances` / `stealing` / `cooldown` | Voice limits: steal oldest, quietest, furthest, or refuse. |
@@ -364,6 +367,30 @@ in and out, and `intensity_parameter` lets a global parameter drive its strength
 [ChirpBusAutomation](docs/classes/ChirpBusAutomation.md) entries in the ChirpConfig let a global
 parameter drive a bus's volume or an effect property through a curve, e.g. `"Danger"` closing a
 low-pass filter on the music bus.
+
+### Effects per event
+
+Give an event `effects` (e.g. an `AudioEffectLowPassFilter`) and it plays through them, without
+setting up a bus: each instance borrows a bus from Chirp's pool that carries copies of the effects
+and feeds the event's bus. With `effect_scope = INSTANCE` (the default) every instance has its own,
+so automation can differ per emitter; `EVENT` shares one bus between all instances.
+
+Drive effect properties with EFFECT automations, from a parameter, along the timeline or along a
+parameter sheet; **Add → Add Effect Automation** in the Chirp Event dock lists every property of the
+event's effects with its range. PAN automation pans the event (Chirp adds the panner).
+
+Occlusion, per emitter: an `Occlusion` parameter (0 = clear, 1 = behind a wall) set from a raycast,
+automating the low-pass's `cutoff_hz` from 20000 down to 800 (and volume a little):
+
+```gdscript
+var blocked := space_state.intersect_ray(query).size() > 0
+footsteps.set_parameter("Occlusion", 1.0 if blocked else 0.0)   # give it a seek_speed to smooth it
+```
+
+Cost: the buses are nearly free and simple filters are cheap (dozens are fine); reverbs, chorus,
+delay and pitch shift are expensive, so keep reverb on a shared bus and route events to it. If more
+instances with effects play at once than `chirp/effect_bus_pool_size`, the extra ones play without
+effects (with a warning).
 
 ### Pausing and muting
 
