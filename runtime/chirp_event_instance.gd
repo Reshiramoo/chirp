@@ -27,6 +27,9 @@ enum Spatial { NONE, SPATIAL_2D, SPATIAL_3D }
 const Timeline := preload("timeline.gd")
 ## How far (seconds) a voice may drift from the playhead after a jump before it is re-seeked.
 const RESYNC_TOLERANCE := 0.05
+## Ogg Vorbis and MP3 can only loop back from their end: a loop region loops them natively when it
+## ends this close (seconds) to the end of the sound.
+const NATIVE_LOOP_END_TOLERANCE := 0.02
 ## AudioStreamPlayer2D.max_distance while Chirp applies the roll-off (effectively no limit).
 const ROLLOFF_FAR := 1.0e7
 
@@ -93,7 +96,9 @@ class Voice:
 	var detached := false # left to play to its end, no longer controlled
 	var fade := 1.0 # PARAMETER sheets: crossfade gain, kept at its last value once detached
 	var start_shift := 0.0 # seconds the sound runs ahead of its timeline position (start offsets)
-	var own_loop: AudioStream # looping instruments: this voice's looping copy of its sound, if any
+	var own_stream: AudioStream # this voice's private copy of its sound, for native looping (or null)
+	var base_loop := {} # own_stream's loop settings outside loop regions
+	var region: Timeline.Mark # the loop region own_stream currently loops natively, if any
 
 
 ## One sound started by a SCATTERER voice.
@@ -334,6 +339,7 @@ func _process(delta: float) -> void:
 	if _timeline:
 		_advance_timeline(delta)
 		_sync_entries()
+		_arm_region_loops()
 	elif _event.sheet_mode == ChirpEvent.SheetMode.PARAMETER:
 		_sync_sheet()
 	for voice in _voices.duplicate():
@@ -580,7 +586,12 @@ func _resync(voice: Voice, expected: float) -> void:
 				return
 			expected = _shifted(expected, voice.start_shift, length)
 		var drift: float = absf(voice.player.get_playback_position() - expected)
-		if length > 0.0:
+		if voice.region and _playhead >= voice.region.time and _playhead < voice.region.end:
+			# looping the region natively: it may have wrapped a moment before or after the playhead
+			var period := voice.region.end - voice.region.time
+			var wrapped := fposmod(voice.player.get_playback_position() - expected, period)
+			drift = minf(wrapped, period - wrapped)
+		elif length > 0.0:
 			drift = minf(drift, absf(length - drift)) # a looping stream may have wrapped
 		if drift > RESYNC_TOLERANCE:
 			if length > 0.0 and expected >= length:
@@ -726,10 +737,11 @@ func _trigger(instrument: ChirpInstrument, offset := 0.0) -> Voice:
 func _start_player(voice: Voice, offset: float, stream: AudioStream) -> bool:
 	if stream == null:
 		return false
+	voice.own_stream = _own_copy(stream, voice.instrument.loop, _has_loop_regions())
+	if voice.own_stream:
+		stream = voice.own_stream
+		voice.base_loop = _loop_settings(stream)
 	if voice.instrument.loop:
-		voice.own_loop = _looping_copy(stream)
-		if voice.own_loop:
-			stream = voice.own_loop
 		if stream.get_length() > 0.0:
 			offset = fposmod(offset, stream.get_length())
 	if offset > 0.0 and stream.get_length() > 0.0 and offset >= stream.get_length():
@@ -775,35 +787,119 @@ func _new_player(stream: AudioStream) -> Node:
 	return player
 
 
-## A copy of [param stream] that loops by itself, so looping instruments wrap around gaplessly
-## instead of restarting a frame late. Shallow: the audio data is shared, not copied. Null when the
-## stream already loops (its own loop points win) or can't loop natively; the instrument then
-## restarts it when it finishes.
-static func _looping_copy(stream: AudioStream) -> AudioStream:
+## A private, shallow copy of [param stream] (the audio data is shared, not copied) whose looping
+## Chirp controls, or null to play the stream as is. [param loop]: looping instruments loop
+## natively (gapless) over the whole sound, unless it already loops by itself (its own loop points
+## win). [param for_regions]: the event has loop regions, which loop the sounds that span them
+## natively too (see _arm_region_loops). Only WAV, Ogg Vorbis and MP3 can; other streams get null
+## and looping instruments restart them when they finish.
+static func _own_copy(stream: AudioStream, loop: bool, for_regions: bool) -> AudioStream:
+	if not (stream is AudioStreamWAV or stream is AudioStreamOggVorbis or stream is AudioStreamMP3) \
+			or stream.get_length() <= 0.0:
+		return null
+	var loops_already: bool = stream.loop_mode != AudioStreamWAV.LOOP_DISABLED if stream is AudioStreamWAV \
+		else stream.get("loop")
+	if not for_regions and (not loop or loops_already):
+		return null
+	var copy := stream.duplicate() as AudioStream
+	if loop and not loops_already:
+		if copy is AudioStreamWAV:
+			_set_loop(copy, {loop_mode = AudioStreamWAV.LOOP_FORWARD, loop_begin = 0,
+				loop_end = roundi(copy.get_length() * copy.mix_rate)})
+		else:
+			copy.set("loop", true)
+	return copy
+
+
+static func _loop_settings(stream: AudioStream) -> Dictionary:
 	if stream is AudioStreamWAV:
-		var wav := stream as AudioStreamWAV
-		if wav.loop_mode != AudioStreamWAV.LOOP_DISABLED or wav.get_length() <= 0.0:
-			return null
-		var copy := wav.duplicate() as AudioStreamWAV
-		copy.loop_mode = AudioStreamWAV.LOOP_FORWARD
-		copy.loop_begin = 0
-		copy.loop_end = roundi(wav.get_length() * wav.mix_rate)
-		return copy
-	if stream is AudioStreamOggVorbis or stream is AudioStreamMP3:
-		if stream.get("loop"):
-			return null
-		var copy := stream.duplicate() as AudioStream
-		copy.set("loop", true)
-		return copy
-	return null
+		return {loop_mode = stream.loop_mode, loop_begin = stream.loop_begin, loop_end = stream.loop_end}
+	return {loop = stream.get("loop"), loop_offset = stream.get("loop_offset")}
 
 
-## Lets a voice's looping copy play to the end of its current pass and finish.
+## Applies loop settings live: the playing sound follows them from its next mix.
+static func _set_loop(stream: AudioStream, settings: Dictionary) -> void:
+	for property: String in settings:
+		stream.set(property, settings[property])
+
+
+## Lets a voice's own copy play to the end of its current pass and finish.
 static func _end_own_loop(voice: Voice) -> void:
-	if voice.own_loop is AudioStreamWAV:
-		voice.own_loop.loop_mode = AudioStreamWAV.LOOP_DISABLED
-	elif voice.own_loop:
-		voice.own_loop.set("loop", false)
+	if voice.own_stream is AudioStreamWAV:
+		voice.own_stream.loop_mode = AudioStreamWAV.LOOP_DISABLED
+	elif voice.own_stream:
+		voice.own_stream.set("loop", false)
+
+
+func _has_loop_regions() -> bool:
+	return _timeline != null and _timeline.marks.any(func(mark: Timeline.Mark) -> bool:
+		return mark.marker.kind == ChirpMarker.Kind.LOOP_REGION)
+
+
+## Seamless loop regions: while the playhead is in a loop region, the sounds spanning it loop that
+## stretch natively (sample-exact), so when the playhead jumps back they are already there and
+## nothing is re-seeked. Checked every frame: when the region's condition switches off, the loop
+## points are dropped and the sounds play on through the region's end.
+func _arm_region_loops() -> void:
+	var region := _upcoming_loop_region()
+	for entry in _timeline.entries:
+		var voice: Voice = _entry_voices.get(entry.index)
+		if voice == null or voice.own_stream == null: # (detached voices have left _entry_voices)
+			continue
+		var wanted: Timeline.Mark = region if region and _can_loop_natively(voice, entry, region) else null
+		if wanted == voice.region:
+			continue
+		voice.region = wanted
+		if wanted == null:
+			_set_loop(voice.own_stream, voice.base_loop)
+			continue
+		var from := wanted.time - entry.start + voice.start_shift
+		var to := wanted.end - entry.start + voice.start_shift
+		if voice.own_stream is AudioStreamWAV:
+			var rate: int = voice.own_stream.mix_rate
+			_set_loop(voice.own_stream, {loop_mode = AudioStreamWAV.LOOP_FORWARD,
+				loop_begin = roundi(from * rate), loop_end = roundi(to * rate)})
+		else:
+			_set_loop(voice.own_stream, {loop = true, loop_offset = from})
+
+
+## The loop region the playhead is in and will loop back at next, or null. Null as well when the
+## loop is uncertain (probability below 100%) or something may stop or move the playhead first.
+func _upcoming_loop_region() -> Timeline.Mark:
+	if _sustain or _state != State.PLAYING:
+		return null
+	var region: Timeline.Mark = null
+	for mark in _timeline.marks:
+		if mark.marker.kind == ChirpMarker.Kind.LOOP_REGION and mark.time <= _playhead and _playhead < mark.end \
+				and (region == null or mark.end < region.end) and _marker_condition(mark.marker):
+			region = mark
+	if region == null or region.marker.probability < 100.0:
+		return null
+	if not _jump.is_empty() and _jump.time <= region.end:
+		return null
+	for mark in _timeline.marks:
+		var kind := mark.marker.kind
+		var ahead := mark.time > _playhead and mark.time < region.end
+		if kind == ChirpMarker.Kind.SUSTAIN_POINT and ahead and not _released_sustains.has(mark) \
+				and _marker_condition(mark.marker):
+			return null
+		if (kind == ChirpMarker.Kind.TRANSITION and ahead or kind == ChirpMarker.Kind.TRANSITION_REGION
+				and mark.time < region.end and mark.end > _playhead) and _marker_condition(mark.marker):
+			return null
+	return region
+
+
+## True when [param voice] starts by [param region]'s start and its sound reaches the region's end
+## within one pass, and its format can loop that stretch: any stretch for WAV; Ogg Vorbis and MP3
+## only up to their end. (A block ending earlier stops the voice before the region loops anyway.)
+static func _can_loop_natively(voice: Voice, entry: Timeline.Entry, region: Timeline.Mark) -> bool:
+	if entry.start > region.time + Timeline.EPSILON:
+		return false
+	var length := voice.own_stream.get_length()
+	var to := region.end - entry.start + voice.start_shift
+	if to > length + Timeline.EPSILON:
+		return false
+	return voice.own_stream is AudioStreamWAV or absf(to - length) <= NATIVE_LOOP_END_TOLERANCE
 
 
 ## A trigger's start offset: the fixed one plus a random extra.

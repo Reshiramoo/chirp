@@ -244,7 +244,8 @@ and the resource itself is left alone). A stream that already loops keeps its ow
 an intro before `loop_offset`); other streams (generators, playlists) restart when they finish,
 about a frame late. Joining part way through (a late start, a jump) lands at the matching point in
 the loop. When the instrument is let go (async playback), looping switches off and the current pass
-plays to its end.
+plays to its end. Loop regions over the sound are seamless too (see
+[LOOP_REGION](ChirpMarker.md#enum-kind)).
 
 ---
 

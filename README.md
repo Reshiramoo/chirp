@@ -281,10 +281,20 @@ The value follows the playhead through loops and jumps; a fade-in over the intro
 before a drop.
 
 **Timing:** the playhead moves once per frame, so markers and jumps are accurate to a frame, not a
-sample. For seamless loops, use a looping instrument (gapless, see
-[`loop`](docs/classes/ChirpInstrument.md#property-loop)) and make the loop region a whole number of
-its passes: when the playhead jumps, voices already at the right spot keep playing instead of
-restarting (anything more than 50 ms off is re-seeked).
+sample. Loop regions are seamless anyway: while the playhead is inside one, every WAV, Ogg Vorbis or
+MP3 sound spanning it loops that exact stretch in the mixer (sample-accurate), so the playhead's
+jump back finds it already there. When the condition switches off, the sounds play on through the
+region's end without a seam. It applies when:
+
+- the sound starts by the region's start and reaches its end within one pass;
+- for Ogg Vorbis and MP3, the region ends where the sound does (they can only loop back from their
+  end; WAV can loop any stretch, so prefer WAV for intro / loop / outro in one file);
+- the loop is certain: probability 100%, and no sustain point, transition or pending quantized jump
+  before the region's end.
+
+Otherwise the region loops as before, accurate to a frame: voices already at the right spot keep
+playing (a looping instrument whose loop region is a whole number of its passes, say), and anything
+more than 50 ms off is re-seeked. Instruments that start inside a region restart on each pass.
 
 ## Parameter sheets
 

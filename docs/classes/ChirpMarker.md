@@ -81,6 +81,8 @@ go.condition_min = 0.5
   `beat_unit`.
 - **LOOP_REGION** = `2`: when the playhead reaches `end` and the condition holds, it jumps back to
   `position`. Uses `position`, `end`, the condition and `probability` (checked each time round).
+  Seamless for WAV, Ogg Vorbis and MP3 sounds that span the region (Ogg and MP3: when it ends where
+  the sound does) while the loop is certain; see [Timelines and interactive music](../../README.md#timelines-and-interactive-music) for the rules.
 - **SUSTAIN_POINT** = `3`: holds the playhead here until
   [key_off()](ChirpEventInstance.md#method-key_off) or the condition stops holding. Uses
   `position` and the condition.
