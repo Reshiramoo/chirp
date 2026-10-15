@@ -54,6 +54,7 @@ const MARKER_COLORS := {
 }
 const PLAYHEAD_COLOR := Color(1.0, 0.3, 0.3)
 const DROP_COLOR := Color(0.45, 0.85, 1.0)
+const ISSUE_COLORS: Array[Color] = [Color(1.0, 0.78, 0.25), Color(0.55, 0.75, 1.0)] # warning, note
 const AUTOMATION_COLORS := {
 	ChirpAutomation.Target.VOLUME: Color(0.98, 0.78, 0.3),
 	ChirpAutomation.Target.PITCH: Color(0.55, 0.9, 0.75),
@@ -81,6 +82,8 @@ var _panning := false
 var waveforms: Object
 ## PARAMETER sheets: instrument index -> how far (0..1) through its sound the preview is.
 var voice_progress := {}
+## Authoring issues to flag: resource (instrument, marker, automation) -> EventChecks.Severity.
+var issues := {}
 
 
 func _init() -> void:
@@ -154,6 +157,8 @@ func _draw() -> void:
 		draw_rect(Rect2(rect.position, Vector2(rect.size.x, 3)), color)
 		if marker == selected:
 			draw_rect(rect, Color.WHITE, false, 2.0)
+		if issues.has(marker):
+			_draw_issue(Vector2(rect.end.x - 9, rect.position.y + 10), issues[marker])
 		var label := "loop" if marker.kind == ChirpMarker.Kind.LOOP_REGION else "→ " + marker.destination
 		if not marker.condition_parameter.is_empty():
 			label += "  if %s" % marker.condition_parameter
@@ -171,6 +176,8 @@ func _draw() -> void:
 		if marker == selected:
 			draw_rect(rect, Color.WHITE, false, 2.0)
 		_draw_clipped_text(font, small, TimelineModel.marker_label(marker), rect.grow_individual(-5, 0, 0, 0), Color(0.08, 0.08, 0.1))
+		if issues.has(marker):
+			_draw_issue(Vector2(rect.end.x + 8, rect.get_center().y), issues[marker])
 
 	# Instruments
 	for i in event.instruments.size():
@@ -236,6 +243,9 @@ func _draw() -> void:
 			header.call(label, model.instrument_y(i), model.row_height, text_color)
 			continue
 		var label_width: float = model.header_controls(i).mute.position.x - 12.0
+		if issues.has(instrument):
+			label_width -= 16.0
+			_draw_issue(Vector2(8.0 + label_width + 8.0, model.instrument_y(i) + model.row_height / 2.0), issues[instrument])
 		var muted: bool = audition != null and audition.is_instrument_muted(instrument)
 		_draw_header_text(font, small, label, Rect2(8, model.instrument_y(i), label_width, model.row_height),
 			text_color.darkened(0.45) if muted else text_color)
@@ -245,6 +255,8 @@ func _draw() -> void:
 		var automation: ChirpAutomation = lanes[lane].automation
 		var owner: int = lanes[lane].owner
 		var top := model.automation_y(lane)
+		if issues.has(automation):
+			_draw_issue(Vector2(left - 10, top + model.automation_height / 2.0), issues[automation])
 		if owner >= 0:
 			# An instrument's lane: indented under it, with a bar in the instrument's colour
 			var instrument := event.instruments[owner]
@@ -613,6 +625,14 @@ func _apply(resource: Resource, values: Dictionary) -> void:
 	for property: String in values:
 		resource.set(property, values[property])
 	queue_redraw()
+
+
+## A small triangle flagging an authoring issue, centred on [param at].
+func _draw_issue(at: Vector2, severity: int) -> void:
+	var r := 6.0 * model.row_height / TimelineModel.BASE_ROW_HEIGHT # follows the editor scale
+	draw_colored_polygon(PackedVector2Array([at + Vector2(0, -r), at + Vector2(r, r * 0.8), at + Vector2(-r, r * 0.8)]),
+		ISSUE_COLORS[clampi(severity, 0, 1)])
+	draw_line(at + Vector2(0, -r * 0.4), at + Vector2(0, r * 0.25), Color(0.1, 0.1, 0.1), maxf(r / 4.0, 1.0))
 
 
 ## The instrument's sound drawn into its block, one peak per pixel column, plus the preview's

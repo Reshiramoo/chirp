@@ -10,6 +10,8 @@ const TimelineView := preload("timeline_view.gd")
 const TimelineModel := preload("timeline_model.gd")
 const PreviewPanel := preload("preview_panel.gd")
 const WaveformCache := preload("waveform_cache.gd")
+const EventChecks := preload("event_checks.gd")
+const CHECK_INTERVAL := 0.5 # seconds between re-running the authoring checks
 
 const ADD_INSTRUMENT := 100
 const ADD_VOLUME_LANE := 101
@@ -40,6 +42,10 @@ var _needs_fit := false
 var _effect_menu: Array[Dictionary] = [] # the Add menu's effect properties: {index, property, range}
 var _rename_edit: LineEdit
 var _waveforms := WaveformCache.new()
+var _issues: Array[Dictionary] = [] # EventChecks results for the shown event
+var _issues_button: Button
+var _issues_menu := PopupMenu.new()
+var _check_in := 0.0
 var _renaming: ChirpMarker
 var _shown_mode := -1 # sheet mode the view was set up for; switching it re-runs edit()
 
@@ -72,6 +78,13 @@ func setup(plugin: EditorPlugin, chirp: Node) -> void:
 	_status.custom_minimum_size.x = 170 * EditorInterface.get_editor_scale()
 	_status.clip_text = true
 	toolbar.add_child(_status)
+	_issues_button = Button.new()
+	_issues_button.flat = true
+	_issues_button.visible = false
+	_issues_button.pressed.connect(_show_issues)
+	toolbar.add_child(_issues_button)
+	_issues_menu.id_pressed.connect(_on_issue_chosen)
+	add_child(_issues_menu)
 	toolbar.add_child(VSeparator.new())
 
 	var snap_label := Label.new()
@@ -192,6 +205,7 @@ func edit(event: ChirpEvent) -> void:
 	for option in 3:
 		_snap.set_item_text(option, ["Off", "Fine", "Coarse"][option] if sheet else ["Off", "Beat", "Bar"][option])
 	_needs_fit = editable
+	refresh_issues()
 	_view.queue_redraw()
 
 
@@ -199,11 +213,14 @@ static func _is_editable(event: ChirpEvent) -> bool:
 	return event != null and event.sheet_mode in [ChirpEvent.SheetMode.TIMELINE, ChirpEvent.SheetMode.PARAMETER]
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if not is_visible_in_tree():
 		return
 	var model := _view.model
 	_status.text = _preview.status_text()
+	_check_in -= delta
+	if _check_in <= 0.0:
+		refresh_issues()
 	if _event and _event.sheet_mode != _shown_mode:
 		edit(_event) # the sheet mode was just switched
 	if model.event == null:
@@ -229,6 +246,40 @@ func _process(_delta: float) -> void:
 	if instance == null or not model.is_sheet():
 		_view.voice_progress = {}
 	_view.queue_redraw()
+
+
+## Re-runs the authoring checks on the shown event: the toolbar's warning button and the marks in
+## the view.
+func refresh_issues() -> void:
+	_check_in = CHECK_INTERVAL
+	var globals: Array = _chirp.config.global_parameters if _chirp and _chirp.config else []
+	_issues = EventChecks.check(_event, globals)
+	_view.issues = EventChecks.by_resource(_issues)
+	var warnings := _issues.filter(func(issue: Dictionary) -> bool: return issue.severity == EventChecks.Severity.WARNING).size()
+	_issues_button.visible = not _issues.is_empty()
+	_issues_button.icon = _icon("NodeWarning")
+	_issues_button.modulate = TimelineView.ISSUE_COLORS[0 if warnings > 0 else 1]
+	_issues_button.text = str(_issues.size())
+	_issues_button.tooltip_text = "%d warning(s), %d note(s): click to list them" % [warnings, _issues.size() - warnings]
+
+
+func _show_issues() -> void:
+	_issues_menu.clear()
+	for i in _issues.size():
+		var issue: Dictionary = _issues[i]
+		_issues_menu.add_item(("⚠ " if issue.severity == EventChecks.Severity.WARNING else "ⓘ ") + issue.message, i)
+	var at := _issues_button.get_screen_position() + Vector2(0, _issues_button.size.y)
+	_issues_menu.popup(Rect2i(Vector2i(at), Vector2i.ZERO))
+
+
+## Selects what an issue is about, in the view and the Inspector.
+func _on_issue_chosen(index: int) -> void:
+	if index < 0 or index >= _issues.size():
+		return
+	var resource: Resource = _issues[index].resource
+	_view.selected = resource if resource != _event else null
+	_view.queue_redraw()
+	_on_item_selected(resource)
 
 
 ## The sheet parameter's definition: the event's own, else the preview Chirp's global one.

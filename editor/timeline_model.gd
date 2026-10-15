@@ -188,7 +188,8 @@ func marker_rect(index: int) -> Rect2:
 
 
 func _flag_layout() -> Dictionary:
-	if not _flags_cache.is_empty():
+	# (markers removed since the last rebuild() would leave stale indices: lay out again)
+	if not _flags_cache.is_empty() and _flags_cache.count == (event.markers.size() if event else 0):
 		return _flags_cache
 	var flags := []
 	if event and not is_sheet():
@@ -211,7 +212,7 @@ func _flag_layout() -> Dictionary:
 		else:
 			lane_ends[lane] = end
 		flag.lane = lane
-	_flags_cache = {flags = flags, lanes = maxi(lane_ends.size(), 1)}
+	_flags_cache = {flags = flags, lanes = maxi(lane_ends.size(), 1), count = event.markers.size() if event else 0}
 	return _flags_cache
 
 
