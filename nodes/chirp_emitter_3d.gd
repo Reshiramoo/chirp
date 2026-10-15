@@ -19,6 +19,9 @@ extends Node3D
 @export var allow_fadeout := true
 ## Only the first play() succeeds.
 @export var trigger_once := false
+## Start loading event_path's file in the background when the emitter enters the scene, instead of
+## on its first play (an assigned event resource loads with the scene anyway).
+@export var preload_event := false
 
 @export_group("Attenuation")
 @export var override_attenuation := false

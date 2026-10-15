@@ -16,9 +16,12 @@ res://assets/sounds/sfxs/coin.mp3        -> "event:/sfxs/coin"     (plain audio 
 res://assets/sounds/sfxs/ui/click.tres   -> "event:/sfxs/ui/click" (ChirpEvent resource)
 ```
 
-A [ChirpEvent](ChirpEvent.md) resource wins over an audio file with the same name. Files are
-loaded the first time their event is used. Plain audio files become a one-instrument event on
-their directory's bus.
+A [ChirpEvent](ChirpEvent.md) resource wins over an audio file with the same name. Plain audio
+files become a one-instrument event on their directory's bus.
+
+Files load the first time their event is used, and then stay loaded. That first load can stall a
+frame, on mobile especially; load events ahead of time with [preload_events()](#method-preload_events),
+e.g. behind a loading screen, and free them with [unload_events()](#method-unload_events).
 
 Every method that takes `event_or_path` accepts a [ChirpEvent](ChirpEvent.md) or an
 `"event:/..."` path.
@@ -40,14 +43,28 @@ Every method that takes `event_or_path` accepts a [ChirpEvent](ChirpEvent.md) or
 | [ChirpEventInstance](ChirpEventInstance.md) | [create_instance](#method-create_instance)(event_or_path: Variant) |
 | Array[[ChirpEventInstance](ChirpEventInstance.md)] | [get_active_instances](#method-get_active_instances)(event_or_path: Variant = null) |
 | [ChirpEvent](ChirpEvent.md) | [get_event](#method-get_event)(event_or_path: Variant) |
+| float | [get_preload_progress](#method-get_preload_progress)() |
 | String | [get_event_file](#method-get_event_file)(event_path: String) |
 | PackedStringArray | [get_event_paths](#method-get_event_paths)() |
+| bool | [is_event_loaded](#method-is_event_loaded)(event_path: String) |
+| bool | [is_preloading](#method-is_preloading)() |
 | [ChirpEventInstance](ChirpEventInstance.md) | [play_one_shot](#method-play_one_shot)(event_or_path: Variant, position: Variant = null) |
 | [ChirpEventInstance](ChirpEventInstance.md) | [play_one_shot_attached](#method-play_one_shot_attached)(event_or_path: Variant, node: Node) |
+| void | [preload_events](#method-preload_events)(targets: Variant = "event:/", threaded: bool = true) |
 | void | [register_event](#method-register_event)(event_path: String, event: [ChirpEvent](ChirpEvent.md)) |
 | void | [scan](#method-scan)(directories: Dictionary) |
 | void | [stop_all](#method-stop_all)(allow_fadeout: bool = true) |
 | PackedStringArray | [suggest_paths](#method-suggest_paths)(event_path: String) |
+| void | [unload_events](#method-unload_events)(targets: Variant = "event:/") |
+
+## Signals
+
+<a id="signal-preload_finished"></a>
+### preload_finished()
+
+Emitted once no threaded preloads are pending any more. Always emitted on a later frame than the
+[preload_events()](#method-preload_events) call (even when there was nothing to load), so it can be
+awaited right after the call.
 
 ## Constants
 
@@ -117,10 +134,31 @@ unknown paths and for events added with [register_event()](#method-register_even
 
 ---
 
+<a id="method-get_preload_progress"></a>
+### float get_preload_progress()
+
+Progress of the current threaded preloads, 0..1, for a loading bar. `1.0` when none are pending.
+
+---
+
 <a id="method-get_event_paths"></a>
 ### PackedStringArray get_event_paths()
 
 Every known event path, from the sound directories and [register_event()](#method-register_event).
+
+---
+
+<a id="method-is_event_loaded"></a>
+### bool is_event_loaded(event_path: String)
+
+`true` when the event's file is loaded (or it was added with [register_event()](#method-register_event)).
+
+---
+
+<a id="method-is_preloading"></a>
+### bool is_preloading()
+
+`true` while threaded preloads are pending.
 
 ---
 
@@ -140,6 +178,30 @@ while it plays, e.g. to connect to its `stopped` signal.
 
 Like [play_one_shot()](#method-play_one_shot), but the sound follows `node` (a Node2D or Node3D)
 while it lives, and stays where the node was last seen if it is freed.
+
+---
+
+<a id="method-preload_events"></a>
+### void preload_events(targets: Variant = "event:/", threaded: bool = true)
+
+Loads events ahead of their first use, so playing them doesn't stall. `targets` is an
+`"event:/..."` path, a folder of them (`"event:/sfxs"` covers everything under it, matching whole
+path segments), or an Array of either; the default is every event. Events already loaded are
+skipped, and unknown targets are reported once.
+
+With `threaded`, the files load on Godot's background loader threads: watch
+[get_preload_progress()](#method-get_preload_progress) and wait for [preload_finished](#signal-preload_finished).
+Without it, they load before the call returns. Using an event while it is still loading in the
+background just loads it right away.
+
+```gdscript
+func _on_level_loading() -> void:
+	Chirp.events.preload_events(["event:/sfxs", "event:/bgms/level_2"])
+	while Chirp.events.is_preloading():
+		$LoadingBar.value = Chirp.events.get_preload_progress()
+		await get_tree().process_frame
+	start_level()
+```
 
 ---
 
@@ -185,3 +247,14 @@ when a path is missing its sound directory's folder name or its `event:/` prefix
 ```gdscript
 Chirp.events.suggest_paths("event:/coin")  # ["event:/audio/coin"] with the default res://audio
 ```
+
+---
+
+<a id="method-unload_events"></a>
+### void unload_events(targets: Variant = "event:/")
+
+Lets Godot free events' files: Chirp drops its references to them, so they are freed once nothing
+else uses them (instances still playing keep theirs, and so do emitters with an `event` resource
+assigned). The next use loads them again. Same `targets` as [preload_events()](#method-preload_events).
+Events added with [register_event()](#method-register_event) are kept, since there's no file to
+reload them from.

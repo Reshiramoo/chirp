@@ -21,6 +21,7 @@ No native libraries, so it runs anywhere Godot does (desktop, Android, iOS, web)
 - [Events and event paths](#events-and-event-paths)
   - [Scatterer and programmer instruments](#scatterer-and-programmer-instruments)
 - [Playing events from code](#playing-events-from-code)
+  - [Loading](#loading)
 - [Instances and their lifecycle](#instances-and-their-lifecycle)
 - [Parameters](#parameters)
 - [Timelines and interactive music](#timelines-and-interactive-music)
@@ -145,7 +146,7 @@ grouped by module:
 
 | Module | Calls |
 |---|---|
-| [`Chirp.events`](docs/classes/ChirpEvents.md) | `programmer_sound_provider`, `get_event`, `get_event_paths`, `get_event_file`, `register_event`, `create_instance`, `play_one_shot`, `play_one_shot_attached`, `get_active_instances`, `stop_all`, `scan` |
+| [`Chirp.events`](docs/classes/ChirpEvents.md) | `preload_events`, `unload_events`, `is_event_loaded`, `get_preload_progress`, `programmer_sound_provider`, `get_event`, `get_event_paths`, `get_event_file`, `register_event`, `create_instance`, `play_one_shot`, `play_one_shot_attached`, `get_active_instances`, `stop_all`, `scan` |
 | [`Chirp.mixer`](docs/classes/ChirpMixer.md) | `set_bus_volume`, `get_bus_volume`, `set_bus_mute`, `set_bus_paused`, `stop_bus_events`, `resolve_bus`, `set_vca_volume`, `get_vca_volume`, `start_snapshot`, `get_active_snapshots`, `stop_all_snapshots`, `pause_all`, `mute_all` |
 | [`Chirp.parameters`](docs/classes/ChirpParameters.md) | `set_value`, `set_label`, `get_value` (global parameters) |
 
@@ -159,6 +160,22 @@ Chirp.mixer.pause_all(true)                    # e.g. while an ad shows
 ```
 
 Every call accepts either an `"event:/..."` path or a ChirpEvent resource.
+
+### Loading
+
+An event's file loads the first time it plays, then stays loaded. That first load can cause a small
+hitch, most noticeable on mobile, so load what a level needs up front, e.g. behind a loading screen:
+
+```gdscript
+Chirp.events.preload_events(["event:/sfxs", "event:/bgms/level_2"])   # in the background
+await Chirp.events.preload_finished                                      # or poll get_preload_progress()
+
+Chirp.events.unload_events("event:/bgms/level_1")   # let Godot free what's no longer needed
+```
+
+Folders cover everything under them. Unloading never cuts off a sound that is playing, and the next
+play loads the file again. On emitters that use `event_path`, tick `preload_event` to load when the
+emitter enters the scene.
 
 ## Instances and their lifecycle
 

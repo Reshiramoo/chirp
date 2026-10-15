@@ -9,6 +9,13 @@ extends RefCounted
 ## res://assets/sounds/sfxs/ui/click.tres   -> "event:/sfxs/ui/click" (ChirpEvent resource)
 ## [/codeblock]
 ## A ChirpEvent resource wins over an audio file with the same name.
+##
+## Files load the first time their event is used and then stay loaded. To avoid that first-use
+## stall (on mobile especially), load them ahead of time with [method preload_events]; free them
+## with [method unload_events].
+
+## No preloads are pending any more (emitted on a later frame, so it can always be awaited).
+signal preload_finished
 
 const EVENT_PREFIX := "event:/"
 const AUDIO_EXTENSIONS: Array[String] = ["wav", "ogg", "mp3"]
@@ -18,7 +25,7 @@ var _chirp: Node
 var _entries := {} # "event:/sfxs/coin" -> {path: String, bus: String, event: ChirpEvent}
 var _directories := {} # directory -> bus path
 var _active: Array[ChirpEventInstance] = []
-var _last_start_msec := {} # ChirpEvent -> Time.get_ticks_msec()
+var _last_start_msec := {} # ChirpEvent instance id -> Time.get_ticks_msec() (ids, so events can be freed)
 var _start_counter := 0
 # Listener state, refreshed every frame for built-in parameters and stealing.
 var _listener_2d := Transform2D.IDENTITY
@@ -27,6 +34,10 @@ var _listener_3d := Transform3D.IDENTITY
 var _listener_3d_velocity := Vector3.ZERO
 var _listener_ready := false
 var _listener_nodes: Array[Node] = [] # ChirpListener2D/3D that are current, most recent last
+var _preloading := {} # file path -> event paths waiting for its threaded load
+var _preload_total := 0 # files in the current preload batch
+var _preload_done := 0
+var _preload_signal_queued := false
 
 ## Supplies sounds for PROGRAMMER instruments that their instance didn't get one for:
 ## [code]func(key: String, instance: ChirpEventInstance) -> AudioStream[/code]. E.g. a lookup of
@@ -77,6 +88,66 @@ func get_event(event_or_path: Variant) -> ChirpEvent:
 	if entry.event == null:
 		entry.event = _load_event(entry.path, entry.bus)
 	return entry.event
+
+
+## Loads events ahead of their first use, so playing them doesn't stall. [param targets] is an
+## "event:/..." path, a folder of them ("event:/sfxs" covers everything under it), or an Array of
+## either; by default every event. With [param threaded] the files load in the background;
+## [signal preload_finished] fires once nothing is pending ([method get_preload_progress] tracks it).
+## [codeblock]
+## Chirp.events.preload_events(["event:/sfxs", "event:/bgms/level_2"])
+## await Chirp.events.preload_finished
+## [/codeblock]
+func preload_events(targets: Variant = EVENT_PREFIX, threaded := true) -> void:
+	for event_path in _matching(targets):
+		var entry: Dictionary = _entries[event_path]
+		if entry.event or entry.path.is_empty():
+			continue
+		if not threaded:
+			entry.event = _load_event(entry.path, entry.bus)
+			continue
+		if not _preloading.has(entry.path):
+			if ResourceLoader.load_threaded_request(entry.path) != OK:
+				push_warning("Chirp: couldn't start loading '%s'." % entry.path)
+				continue
+			_preloading[entry.path] = []
+			_preload_total += 1
+		_preloading[entry.path].append(event_path)
+	if _preloading.is_empty():
+		_queue_preload_finished()
+
+
+## Lets Godot free events' files: Chirp drops its references (playing instances keep theirs), and
+## the next use loads them again. Same [param targets] as [method preload_events]. Events added
+## with [method register_event] are kept.
+func unload_events(targets: Variant = EVENT_PREFIX) -> void:
+	for event_path in _matching(targets):
+		var entry: Dictionary = _entries[event_path]
+		if not entry.path.is_empty():
+			entry.event = null
+
+
+## True when [param event_path]'s file is loaded (or it was added with [method register_event]).
+func is_event_loaded(event_path: String) -> bool:
+	var entry: Variant = _entries.get(event_path)
+	return entry != null and entry.event != null
+
+
+## True while threaded preloads are pending.
+func is_preloading() -> bool:
+	return not _preloading.is_empty()
+
+
+## Progress of the current threaded preloads, 0..1 (1 when none are pending).
+func get_preload_progress() -> float:
+	if _preloading.is_empty() or _preload_total == 0:
+		return 1.0
+	var progress := float(_preload_done)
+	for path: String in _preloading:
+		var file_progress := []
+		ResourceLoader.load_threaded_get_status(path, file_progress)
+		progress += file_progress[0] if not file_progress.is_empty() else 0.0
+	return clampf(progress / _preload_total, 0.0, 1.0)
 
 
 ## Known paths that end the same way as [param event_path], e.g. "event:/audio/coin" for "event:/coin".
@@ -150,6 +221,8 @@ func stop_all(allow_fadeout := true) -> void:
 # --- internals ---------------------------------------------------------------------
 
 func _process(delta: float) -> void:
+	if not _preloading.is_empty():
+		_poll_preloads()
 	_update_listeners(delta)
 	for instance in _active.duplicate():
 		instance._process(delta)
@@ -229,7 +302,63 @@ func _scan_directory(directory: String, prefix: String, bus: String) -> void:
 
 
 func _load_event(path: String, bus: String) -> ChirpEvent:
-	var resource := load(path)
+	return _as_event(load(path), path, bus)
+
+
+## Collects finished threaded preloads.
+func _poll_preloads() -> void:
+	for path: String in _preloading.keys():
+		var status := ResourceLoader.load_threaded_get_status(path)
+		if status == ResourceLoader.THREAD_LOAD_IN_PROGRESS:
+			continue
+		var resource: Resource = ResourceLoader.load_threaded_get(path) if status == ResourceLoader.THREAD_LOAD_LOADED else null
+		if resource == null:
+			push_warning("Chirp: couldn't preload '%s'." % path)
+		for event_path: String in _preloading[path]:
+			var entry: Variant = _entries.get(event_path)
+			if resource and entry and entry.event == null and entry.path == path: # skip if loaded meanwhile or rescanned
+				entry.event = _as_event(resource, path, entry.bus)
+		_preloading.erase(path)
+		_preload_done += 1
+	if _preloading.is_empty():
+		_queue_preload_finished()
+
+
+func _queue_preload_finished() -> void:
+	if not _preload_signal_queued:
+		_preload_signal_queued = true
+		_emit_preload_finished.call_deferred()
+
+
+func _emit_preload_finished() -> void:
+	_preload_signal_queued = false
+	if _preloading.is_empty():
+		_preload_total = 0
+		_preload_done = 0
+		preload_finished.emit()
+
+
+## Event paths [param targets] names: a path, a folder of paths, or an Array of either.
+func _matching(targets: Variant) -> PackedStringArray:
+	var found := PackedStringArray()
+	var list: Array = targets if targets is Array else Array(targets) if targets is PackedStringArray else [targets]
+	for target in list:
+		if not (target is String or target is StringName):
+			continue # ChirpEvent resources are loaded already
+		var prefix := String(target).trim_suffix("/") # "event:/" -> "event:", which prefixes every path
+		var matched := false
+		for event_path: String in _entries:
+			if event_path == prefix or event_path.begins_with(prefix + "/"):
+				if event_path not in found:
+					found.append(event_path)
+				matched = true
+		if not matched:
+			_chirp._warn_once("match:" + prefix, "Chirp: no events at '%s'.%s" % [prefix, _unknown_hint(prefix)])
+	return found
+
+
+## The event for a loaded file: a ChirpEvent as is, an audio file wrapped in a one-instrument event.
+func _as_event(resource: Resource, path: String, bus: String) -> ChirpEvent:
 	if resource is ChirpEvent:
 		return resource
 	if resource is AudioStream:
@@ -256,8 +385,9 @@ func _bus_path(event: ChirpEvent) -> String:
 
 func _can_start(instance: ChirpEventInstance) -> bool:
 	var event := instance._event
-	if event.cooldown > 0.0 and not instance.is_playing() and _last_start_msec.has(event):
-		if Time.get_ticks_msec() - _last_start_msec[event] < event.cooldown * 1000.0:
+	var id := event.get_instance_id()
+	if event.cooldown > 0.0 and not instance.is_playing() and _last_start_msec.has(id):
+		if Time.get_ticks_msec() - _last_start_msec[id] < event.cooldown * 1000.0:
 			return false
 	if event.max_instances <= 0:
 		return true
@@ -282,7 +412,8 @@ func _can_start(instance: ChirpEventInstance) -> bool:
 func _register_start(instance: ChirpEventInstance) -> void:
 	_start_counter += 1
 	instance._start_order = _start_counter
-	_last_start_msec[instance._event] = Time.get_ticks_msec()
+	if instance._event.cooldown > 0.0:
+		_last_start_msec[instance._event.get_instance_id()] = Time.get_ticks_msec()
 	if not _active.has(instance):
 		_active.append(instance)
 

@@ -38,6 +38,7 @@ The instance follows the emitter, so it plays as 3D audio.
 | bool | [override_attenuation](#property-override_attenuation) | `false` |
 | Dictionary[String, float] | [parameters](#property-parameters) | `{}` |
 | [Trigger](#enum-trigger) | [play_on](#property-play_on) | `NONE` |
+| bool | [preload_event](#property-preload_event) | `false` |
 | [Trigger](#enum-trigger) | [stop_on](#property-stop_on) | `NONE` |
 | StringName | [trigger_group](#property-trigger_group) | `&""` |
 | bool | [trigger_once](#property-trigger_once) | `false` |
@@ -134,6 +135,15 @@ Parameter values applied to each instance when it starts, e.g. `{"Size": 2.0}`.
 
 When to call [play()](#method-play). See [Trigger](#enum-trigger). Set before the emitter enters
 the tree.
+
+---
+
+<a id="property-preload_event"></a>
+### bool preload_event = `false`
+
+Start loading [event_path](#property-event_path)'s file in the background when the emitter enters
+the scene, instead of on its first play (see [ChirpEvents.preload_events()](ChirpEvents.md#method-preload_events)).
+An [event](#property-event) resource assigned directly loads with the scene anyway.
 
 ---
 

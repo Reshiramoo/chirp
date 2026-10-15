@@ -29,6 +29,8 @@ func _init(host) -> void:
 func setup() -> void:
 	wire(_host.play_on, play)
 	wire(_host.stop_on, stop)
+	if _host.preload_event and _host.event == null and not _host.event_path.is_empty():
+		_chirp().events.preload_events(_host.event_path)
 
 
 func on_exit_tree() -> void:
