@@ -96,7 +96,7 @@ func get_event(event_or_path: Variant) -> ChirpEvent:
 		return event_or_path
 	var entry: Variant = _entries.get(String(event_or_path))
 	if entry == null:
-		push_error("Chirp: unknown event '%s'.%s" % [event_or_path, _unknown_hint(String(event_or_path))])
+		_chirp._error("Chirp: unknown event '%s'.%s" % [event_or_path, _unknown_hint(String(event_or_path))])
 		return null
 	if entry.event == null:
 		entry.event = _load_event(entry.path, entry.bus)
@@ -121,7 +121,7 @@ func preload_events(targets: Variant = EVENT_PREFIX, threaded := true) -> void:
 			continue
 		if not _preloading.has(entry.path):
 			if ResourceLoader.load_threaded_request(entry.path) != OK:
-				push_warning("Chirp: couldn't start loading '%s'." % entry.path)
+				_chirp._warn("Chirp: couldn't start loading '%s'." % entry.path)
 				continue
 			_preloading[entry.path] = []
 			_preload_total += 1
@@ -396,7 +396,7 @@ func _poll_preloads() -> void:
 			continue
 		var resource: Resource = ResourceLoader.load_threaded_get(path) if status == ResourceLoader.THREAD_LOAD_LOADED else null
 		if resource == null:
-			push_warning("Chirp: couldn't preload '%s'." % path)
+			_chirp._warn("Chirp: couldn't preload '%s'." % path)
 		for event_path: String in _preloading[path]:
 			var entry: Variant = _entries.get(event_path)
 			if resource and entry and entry.event == null and entry.path == path: # skip if loaded meanwhile or rescanned
@@ -452,7 +452,7 @@ func _as_event(resource: Resource, path: String, bus: String) -> ChirpEvent:
 		event.instruments.append(instrument)
 		event.bus = bus
 		return event
-	push_error("Chirp: '%s' is neither a ChirpEvent nor an AudioStream." % path)
+	_chirp._error("Chirp: '%s' is neither a ChirpEvent nor an AudioStream." % path)
 	return null
 
 

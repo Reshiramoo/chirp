@@ -54,6 +54,17 @@ idle; the plugin auditions sounds through a separate copy with [preview](#proper
 | void | [set_instrument_muted](#method-set_instrument_muted)(instrument: [ChirpInstrument](ChirpInstrument.md), muted: bool) |
 | void | [set_instrument_soloed](#method-set_instrument_soloed)(instrument: [ChirpInstrument](ChirpInstrument.md), soloed: bool) |
 
+## Signals
+
+<a id="signal-warning_issued"></a>
+### warning_issued(message: String, is_error: bool)
+
+Emitted for every warning and error Chirp reports, which are also printed to the Output panel as
+usual: unknown events, buses, parameters or snapshots, missing destinations, a full effect-bus
+pool... Warnings that Chirp reports only once (per bus, parameter...) are signalled once too. The
+Chirp Event dock shows the editor preview's in its log; connect it to show them in a debug
+overlay of your own.
+
 ## Constants
 
 - **SETTING_CONFIG** = `"chirp/config"`: project setting holding the path of the [ChirpConfig](ChirpConfig.md).

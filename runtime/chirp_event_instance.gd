@@ -171,7 +171,7 @@ func is_valid() -> bool:
 ## Starts playback, or restarts it from the beginning if already playing.
 func start() -> void:
 	if _destroyed:
-		push_error("ChirpEventInstance: start() called on a destroyed instance.")
+		_chirp._error("ChirpEventInstance: start() called on a destroyed instance.")
 		return
 	if not _chirp.events._can_start(self):
 		return
@@ -252,7 +252,7 @@ func set_parameter_by_label(parameter_name: String, label: String) -> void:
 		return
 	var value := state.def.label_to_value(label)
 	if value < 0.0:
-		push_warning("Chirp: parameter '%s' has no label '%s'." % [parameter_name, label])
+		_chirp._warn("Chirp: parameter '%s' has no label '%s'." % [parameter_name, label])
 		return
 	state.set_target(value, _state == State.STOPPED)
 
@@ -269,7 +269,7 @@ func set_position(position: Variant) -> void:
 	elif position is Vector3:
 		_spatial = Spatial.SPATIAL_3D
 	else:
-		push_error("ChirpEventInstance.set_position() expects a Vector2 or Vector3.")
+		_chirp._error("ChirpEventInstance.set_position() expects a Vector2 or Vector3.")
 		return
 	_attached = null
 	_position = position
@@ -367,7 +367,7 @@ func call_on_beat(callback: Callable, quantization := ChirpMarker.Quantization.B
 ## Moves the playhead (TIMELINE events), in seconds. Instruments follow it.
 func set_timeline_position(position: float) -> void:
 	if _timeline == null:
-		push_warning("Chirp: set_timeline_position() needs a TIMELINE event.")
+		_chirp._warn("Chirp: set_timeline_position() needs a TIMELINE event.")
 		return
 	_jump_to(maxf(position, 0.0))
 	if is_playing():

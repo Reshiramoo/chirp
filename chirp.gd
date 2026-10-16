@@ -35,6 +35,11 @@ var preview := false
 ## calibrate it (Bluetooth headphones add 100-300 ms); negative values are allowed.
 var latency_offset := 0.0
 
+## Emitted for every warning and error Chirp reports, also printed to the Output panel as usual:
+## unknown events, buses, parameters or snapshots, missing destinations... The Chirp Event dock
+## shows the editor preview's in its log.
+signal warning_issued(message: String, is_error: bool)
+
 const DEBUGGER_MESSAGE := "chirp:stats"
 const DEBUGGER_INTERVAL := 0.25 # seconds between stats sent to the editor's Chirp profiler
 
@@ -49,6 +54,16 @@ var _soloed := {} # ChirpInstrument -> true (auditioning)
 ## [member latency_offset].
 func get_output_latency() -> float:
 	return AudioServer.get_output_latency() + latency_offset
+
+
+func _warn(message: String) -> void:
+	push_warning(message)
+	warning_issued.emit(message, false)
+
+
+func _error(message: String) -> void:
+	push_error(message)
+	warning_issued.emit(message, true)
 
 
 func _init() -> void:
@@ -225,4 +240,4 @@ func _audition_gain(event: ChirpEvent, instrument: ChirpInstrument) -> float:
 func _warn_once(key: String, message: String) -> void:
 	if not _warned.has(key):
 		_warned[key] = true
-		push_warning(message)
+		_warn(message)

@@ -99,7 +99,7 @@ func _resolve_event() -> ChirpEvent:
 	if _host.event:
 		return _host.event
 	if _host.event_path.is_empty():
-		push_warning("%s: no event assigned." % _host.get_path())
+		_chirp()._warn("%s: no event assigned." % _host.get_path())
 		return null
 	return _chirp().events.get_event(_host.event_path)
 
@@ -203,5 +203,5 @@ func _wire_click(pressed: bool, action: Callable) -> void:
 
 
 func _bad_source(trigger: Trigger, expected: String) -> void:
-	push_warning("%s: trigger %s needs its trigger source to be %s." % [
+	_chirp()._warn("%s: trigger %s needs its trigger source to be %s." % [
 		_host.get_path(), Trigger.keys()[trigger], expected])

@@ -55,6 +55,7 @@ func setup(chirp: Node) -> void:
 	_log.scroll_following = true
 	_log.custom_minimum_size.y = 72 * EditorInterface.get_editor_scale()
 	add_child(_log)
+	chirp.warning_issued.connect(_on_warning)
 	show_nothing()
 
 
@@ -96,6 +97,7 @@ func play() -> void:
 			_snapshot_instance.intensity = _intensity.value if _intensity else 1.0
 			_log_line("[color=gray]snapshot started[/color]")
 		return
+	_chirp._warned.clear() # report the event's problems again on every audition
 	# A fresh instance each time, so edits to the event (instruments, markers) are picked up.
 	if _instance:
 		_instance.stop(false)
@@ -342,6 +344,13 @@ func _add_note(text: String) -> void:
 	_parameters.add_child(note)
 	_parameters.add_child(Control.new())
 	_parameters.add_child(Control.new())
+
+
+## Chirp's warnings and errors while auditioning, in the log.
+func _on_warning(message: String, is_error: bool) -> void:
+	var color := _theme_color(&"error_color") if is_error else _theme_color(&"warning_color")
+	_log_line("[color=#%s]%s %s[/color]" % [color.to_html(false), "✖" if is_error else "⚠",
+		message.trim_prefix("Chirp: ").replace("[", "[lb]")])
 
 
 func _log_line(line: String) -> void:

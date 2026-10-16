@@ -26,7 +26,7 @@ func set_label(parameter_name: String, label: String) -> void:
 		return
 	var value := state.def.label_to_value(label)
 	if value < 0.0:
-		push_warning("Chirp: global parameter '%s' has no label '%s'." % [parameter_name, label])
+		_chirp._warn("Chirp: global parameter '%s' has no label '%s'." % [parameter_name, label])
 		return
 	state.set_target(value, false)
 

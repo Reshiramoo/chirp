@@ -99,7 +99,7 @@ func resolve_bus(bus_path: String) -> StringName:
 func set_vca_volume(vca_name: String, volume: float) -> void:
 	var vca := _find_vca(vca_name)
 	if vca == null:
-		push_error("Chirp: unknown VCA '%s'." % vca_name)
+		_chirp._error("Chirp: unknown VCA '%s'." % vca_name)
 		return
 	_vca_gain[vca.name] = maxf(volume, 0.0)
 	_update()
@@ -115,7 +115,7 @@ func get_vca_volume(vca_name: String) -> float:
 func start_snapshot(snapshot_or_name: Variant) -> ChirpSnapshotInstance:
 	var snapshot := _find_snapshot(snapshot_or_name)
 	if snapshot == null:
-		push_error("Chirp: unknown snapshot '%s'." % snapshot_or_name)
+		_chirp._error("Chirp: unknown snapshot '%s'." % snapshot_or_name)
 		return null
 	for override in snapshot.bus_overrides:
 		if override == null:
