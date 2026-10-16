@@ -272,6 +272,18 @@ music.key_off()                         # release a sustain point
 music.set_timeline_position(12.0)       # seek, in seconds
 ```
 
+**Syncing gameplay to the music:** signals fire when the playhead crosses a beat, accurate to a
+frame. For smooth motion, read the position instead. The `get_*_position()` / `get_*_phase()`
+helpers default to the *audible* position: the playhead moved on to this moment, minus the output
+latency, so what you draw matches what's heard. Players can calibrate the latency with
+`Chirp.latency_offset`.
+
+```gdscript
+$Player.position.x = lerpf(start_x, wall_x, music.get_bar_phase())   # touches the wall on each bar
+$Logo.scale = Vector2.ONE * (1.1 - 0.1 * music.get_beat_phase())      # pulses on each beat
+music.call_on_beat(func(bar, beat): spawn_wave(), ChirpMarker.Quantization.BAR)  # next bar, once
+```
+
 **Automation lanes:** volume and pitch can follow the timeline too. In the **Chirp Event** dock,
 **Add → Add Volume Automation** (or Pitch) adds a lane for the whole event, below the instruments;
 right-click an instrument → **Add Volume Automation (this instrument)** adds one for that instrument

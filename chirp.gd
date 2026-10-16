@@ -30,11 +30,21 @@ var config: ChirpConfig
 ## Set by the editor plugin on its own copy used to audition sounds in the editor.
 ## The project's Chirp autoload stays idle in the editor.
 var preview := false
+## Extra seconds between mixing and hearing, on top of what the audio driver reports, for the
+## rhythm helpers (ChirpEventInstance.get_audible_position(), call_on_beat()). Let players
+## calibrate it (Bluetooth headphones add 100-300 ms); negative values are allowed.
+var latency_offset := 0.0
 
 var _voice_root: Node
 var _warned := {}
 var _muted := {} # ChirpInstrument -> true (auditioning)
 var _soloed := {} # ChirpInstrument -> true (auditioning)
+
+
+## Seconds between Chirp mixing a sound and it being heard: the driver's output latency plus
+## [member latency_offset].
+func get_output_latency() -> float:
+	return AudioServer.get_output_latency() + latency_offset
 
 
 func _init() -> void:

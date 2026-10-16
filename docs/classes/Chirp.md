@@ -33,6 +33,7 @@ idle; the plugin auditions sounds through a separate copy with [preview](#proper
 |---|---|---|
 | [ChirpConfig](ChirpConfig.md) | [config](#property-config) | |
 | [ChirpEvents](ChirpEvents.md) | [events](#property-events) | |
+| float | [latency_offset](#property-latency_offset) | `0.0` |
 | [ChirpMixer](ChirpMixer.md) | [mixer](#property-mixer) | |
 | [ChirpParameters](ChirpParameters.md) | [parameters](#property-parameters) | |
 | bool | [preview](#property-preview) | `false` |
@@ -43,6 +44,7 @@ idle; the plugin auditions sounds through a separate copy with [preview](#proper
 |---|---|
 | void | [apply_config](#method-apply_config)(new_config: [ChirpConfig](ChirpConfig.md)) |
 | [ChirpEventInstance](ChirpEventInstance.md) | [create_instance](#method-create_instance)(event_or_path: Variant) |
+| float | [get_output_latency](#method-get_output_latency)() |
 | bool | [is_instrument_muted](#method-is_instrument_muted)(instrument: [ChirpInstrument](ChirpInstrument.md)) |
 | bool | [is_instrument_soloed](#method-is_instrument_soloed)(instrument: [ChirpInstrument](ChirpInstrument.md)) |
 | [ChirpEventInstance](ChirpEventInstance.md) | [play_one_shot](#method-play_one_shot)(event_or_path: Variant, position: Variant = null) |
@@ -74,6 +76,16 @@ or an empty ChirpConfig if that file does not exist. Replace it with [apply_conf
 
 Event registry and instances: finding events by path, creating and playing instances,
 voice limits.
+
+---
+
+<a id="property-latency_offset"></a>
+### float latency_offset = `0.0`
+
+Extra seconds between mixing and hearing, on top of what the audio driver reports, used by the
+rhythm helpers ([get_audible_position()](ChirpEventInstance.md#method-get_audible_position),
+[call_on_beat()](ChirpEventInstance.md#method-call_on_beat)). Let players calibrate it: Bluetooth
+headphones add 100–300 ms. Negative values are allowed.
 
 ---
 
@@ -113,6 +125,14 @@ Instances and snapshots already playing keep playing.
 ### [ChirpEventInstance](ChirpEventInstance.md) create_instance(event_or_path: Variant)
 
 Shortcut for [Chirp.events.create_instance()](ChirpEvents.md#method-create_instance).
+
+---
+
+<a id="method-get_output_latency"></a>
+### float get_output_latency()
+
+Seconds between Chirp mixing a sound and it being heard: `AudioServer.get_output_latency()` plus
+[latency_offset](#property-latency_offset).
 
 ---
 

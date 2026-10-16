@@ -79,6 +79,8 @@ var _jumped := false # the playhead jumped this frame
 var _entry_voices := {} # timeline / parameter sheet instrument index -> Voice
 var _entry_done := {} # instrument index -> true once triggered (until it leaves its range)
 var _quantized := {} # timeline entry index -> playhead time a quantized instrument waits for
+var _processed_usec := 0 # when the playhead last moved, for the audible position between frames
+var _beat_waiters: Array[Dictionary] = [] # call_on_beat(): {callback, bar_only, audible}
 
 
 class Voice:
@@ -280,6 +282,65 @@ func get_timeline_position() -> float:
 	return _playhead
 
 
+## Where the listener is in the timeline right now, in seconds (TIMELINE events): the playhead,
+## moved on by the time since Chirp's last update, minus the output latency (sound reaches the
+## speakers a little after it's mixed). Use it to line visuals up with what's heard. Right after
+## a loop or jump it can briefly read just before the jump's destination. The latency is
+## Chirp.get_output_latency(), which players can calibrate with Chirp.latency_offset.
+func get_audible_position() -> float:
+	if _timeline == null:
+		return 0.0
+	var position := _playhead
+	if _state == State.PLAYING and not _applied_paused and _sustain == null and _processed_usec > 0:
+		position += (Time.get_ticks_usec() - _processed_usec) / 1000000.0
+	return maxf(position - _chirp.get_output_latency(), 0.0)
+
+
+## Beats since the TEMPO marker in effect (0.0 on bar 1 beat 1, the grid timeline_beat counts
+## on; 120 BPM from 0 before any). Fractional: fposmod(…, 1.0) is how far through the beat.
+## [param audible]: at get_audible_position() rather than the playhead.
+func get_beat_position(audible := true) -> float:
+	if _timeline == null:
+		return 0.0
+	return _timeline.beats_at(get_audible_position() if audible else _playhead)
+
+
+## Bars since the TEMPO marker in effect (0.0 at its first bar). Fractional.
+func get_bar_position(audible := true) -> float:
+	if _timeline == null:
+		return 0.0
+	var time := get_audible_position() if audible else _playhead
+	var tempo := _timeline.tempo_at(time)
+	return _timeline.beats_at(time) / (tempo.marker.beats_per_bar if tempo else 4)
+
+
+## How far through the current beat, 0..1 (0 on the beat).
+func get_beat_phase(audible := true) -> float:
+	return fposmod(get_beat_position(audible), 1.0)
+
+
+## How far through the current bar, 0..1 (0 on the bar line).
+func get_bar_phase(audible := true) -> float:
+	return fposmod(get_bar_position(audible), 1.0)
+
+
+## BPM of the TEMPO marker in effect at the playhead (120 before any).
+func get_tempo() -> float:
+	if _timeline == null:
+		return Timeline.DEFAULT_BPM
+	var tempo := _timeline.tempo_at(_playhead)
+	return tempo.marker.bpm if tempo else Timeline.DEFAULT_BPM
+
+
+## Calls [param callback] once, with (bar, beat), on the next beat (or bar line, when
+## [param quantization] is BAR) of the timeline's TEMPO grid. [param audible]: wait the output
+## latency too, so it lands when the beat is heard rather than when it's mixed. Forgotten when
+## the instance stops. Needs a TEMPO marker.
+func call_on_beat(callback: Callable, quantization := ChirpMarker.Quantization.BEAT, audible := true) -> void:
+	_beat_waiters.append({callback = callback, bar_only = quantization == ChirpMarker.Quantization.BAR,
+		audible = audible})
+
+
 ## Moves the playhead (TIMELINE events), in seconds. Instruments follow it.
 func set_timeline_position(position: float) -> void:
 	if _timeline == null:
@@ -338,6 +399,7 @@ func _process(delta: float) -> void:
 
 	if _timeline:
 		_advance_timeline(delta)
+		_processed_usec = Time.get_ticks_usec()
 		_sync_entries()
 		_arm_region_loops()
 	elif _event.sheet_mode == ChirpEvent.SheetMode.PARAMETER:
@@ -528,6 +590,22 @@ func _emit_timeline_events(from: float, to: float) -> void:
 			var tempo: ChirpMarker = event.tempo.marker
 			timeline_beat.emit(event.bar, event.beat, event.time, tempo.bpm,
 				Vector2i(tempo.beats_per_bar, tempo.beat_unit))
+			_wake_beat_waiters(event.bar, event.beat)
+
+
+func _wake_beat_waiters(bar: int, beat: int) -> void:
+	var latency: float = _chirp.get_output_latency()
+	for waiter in _beat_waiters.duplicate():
+		if waiter.bar_only and beat != 1:
+			continue
+		_beat_waiters.erase(waiter)
+		var callback: Callable = waiter.callback
+		if not callback.is_valid():
+			continue
+		if waiter.audible and latency > 0.0:
+			_chirp.get_tree().create_timer(latency).timeout.connect(callback.bind(bar, beat))
+		else:
+			callback.call(bar, beat)
 
 
 ## Starts, stops and re-seeks instruments so they match the playhead.
@@ -1400,6 +1478,7 @@ func _finish_stop() -> void:
 	if _timeline:
 		_reset_timeline_pass()
 	_entry_done.clear()
+	_beat_waiters.clear()
 	_state = State.STOPPED
 	_chirp.events._register_stop(self)
 	stopped.emit()

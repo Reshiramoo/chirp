@@ -46,10 +46,17 @@ footsteps.start()
 | Return | Signature |
 |---|---|
 | void | [attach_to](#method-attach_to)(node: Node) |
+| void | [call_on_beat](#method-call_on_beat)(callback: Callable, quantization: [Quantization](ChirpMarker.md#enum-quantization) = BEAT, audible: bool = true) |
+| float | [get_audible_position](#method-get_audible_position)() |
+| float | [get_bar_phase](#method-get_bar_phase)(audible: bool = true) |
+| float | [get_bar_position](#method-get_bar_position)(audible: bool = true) |
+| float | [get_beat_phase](#method-get_beat_phase)(audible: bool = true) |
+| float | [get_beat_position](#method-get_beat_position)(audible: bool = true) |
 | [ChirpEvent](ChirpEvent.md) | [get_event](#method-get_event)() |
 | float | [get_parameter](#method-get_parameter)(parameter_name: String) |
 | bool | [get_paused](#method-get_paused)() |
 | [State](#enum-state) | [get_state](#method-get_state)() |
+| float | [get_tempo](#method-get_tempo)() |
 | float | [get_timeline_position](#method-get_timeline_position)() |
 | bool | [is_playing](#method-is_playing)() |
 | bool | [is_sustaining](#method-is_sustaining)() |
@@ -195,6 +202,70 @@ non-spatial. Call before [start()](#method-start): players already playing keep 
 
 ---
 
+<a id="method-call_on_beat"></a>
+### void call_on_beat(callback: Callable, quantization: [Quantization](ChirpMarker.md#enum-quantization) = BEAT, audible: bool = true)
+
+Calls `callback(bar, beat)` once, on the next beat (or the next bar line when `quantization` is
+`BAR`) of the TEMPO grid. With `audible`, it waits
+[Chirp.get_output_latency()](Chirp.md#method-get_output_latency) more, so it lands when the beat is
+heard. Forgotten if the instance stops first. Needs a TEMPO marker.
+
+```gdscript
+music.call_on_beat(func(_bar, _beat): spawn_enemy(), ChirpMarker.Quantization.BAR)
+```
+
+---
+
+<a id="method-get_audible_position"></a>
+### float get_audible_position()
+
+TIMELINE events: where the listener is in the timeline right now, in seconds. That's the playhead,
+moved on by the time since Chirp's last update (so it's smooth between frames), minus
+[Chirp.get_output_latency()](Chirp.md#method-get_output_latency), since sound reaches the speakers
+a little after it's mixed. Use it to line visuals up with what's heard. Right after a loop or jump
+it can briefly read just before the jump's destination. Stops moving while paused or held at a
+sustain point. `0.0` for other events.
+
+---
+
+<a id="method-get_bar_phase"></a>
+### float get_bar_phase(audible: bool = true)
+
+How far through the current bar, `0.0` (on the bar line) to `1.0`. Drive anything that should hit
+on the bar from it:
+
+```gdscript
+func _process(_delta: float) -> void:
+	$Player.position.x = lerpf(start_x, wall_x, music.get_bar_phase()) # reaches the wall on each bar
+```
+
+---
+
+<a id="method-get_bar_position"></a>
+### float get_bar_position(audible: bool = true)
+
+Bars since the TEMPO marker in effect (`0.0` at its first bar line), using its `beats_per_bar`.
+Fractional; see [get_beat_position()](#method-get_beat_position).
+
+---
+
+<a id="method-get_beat_phase"></a>
+### float get_beat_phase(audible: bool = true)
+
+How far through the current beat, `0.0` (on the beat) to `1.0`.
+
+---
+
+<a id="method-get_beat_position"></a>
+### float get_beat_position(audible: bool = true)
+
+Beats since the TEMPO marker in effect: `0.0` on its bar 1 beat 1, the same grid
+[timeline_beat](#signal-timeline_beat) counts on (120 BPM from `0` before any TEMPO marker).
+Fractional. With `audible`, at [get_audible_position()](#method-get_audible_position); otherwise at
+the playhead.
+
+---
+
 <a id="method-get_event"></a>
 ### [ChirpEvent](ChirpEvent.md) get_event()
 
@@ -222,6 +293,13 @@ The value set with [set_paused()](#method-set_paused). Doesn't report pausing by
 ### [State](#enum-state) get_state()
 
 The current [State](#enum-state).
+
+---
+
+<a id="method-get_tempo"></a>
+### float get_tempo()
+
+BPM of the TEMPO marker in effect at the playhead (120 before any).
 
 ---
 
