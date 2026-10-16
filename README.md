@@ -296,6 +296,7 @@ reaches 0.5.
 ```gdscript
 music.timeline_beat.connect(func(bar, beat, position, tempo, signature): pulse_lights())
 music.timeline_marker.connect(func(marker_name, position): print(marker_name))
+music.sound_played.connect(func(instrument, stream): if stream: print("playing ", stream.resource_path))
 music.set_parameter("Intensity", 1.0)   # the transition region jumps on the next bar
 music.key_off()                         # release a sustain point
 music.set_timeline_position(12.0)       # seek, in seconds

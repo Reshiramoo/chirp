@@ -19,6 +19,12 @@ signal timeline_beat(bar: int, beat: int, position: float, tempo: float, time_si
 ## A PROGRAMMER instrument is about to play and asks for its sound. Emitted synchronously:
 ## call set_programmer_sound(key, stream) from the handler to supply it.
 signal programmer_sound_requested(key: String, instrument: ChirpInstrument)
+## Emitted when one of the event's sounds starts: an instrument's sound (with the stream it
+## picked from its playlist), each scattered sound, or a nested event (stream null). Looping
+## sounds emit it once, not on every pass.
+signal sound_played(instrument: ChirpInstrument, stream: AudioStream)
+## Emitted when a sound from sound_played ends, is cut, or stops with the instance.
+signal sound_stopped(instrument: ChirpInstrument, stream: AudioStream)
 ## Emitted when the instance goes virtual (over the voice budget, or too quiet to hear) or comes
 ## back. See is_virtual().
 signal virtual_changed(virtual: bool)
@@ -109,6 +115,7 @@ class Voice:
 	var ramp := 1.0 # transitions: gain fading in or out...
 	var ramp_to := 1.0 # ...toward this (0 = stop when it gets there)...
 	var ramp_speed := 0.0 # ...this much per second
+	var stream: AudioStream # the sound picked (own_stream is Chirp's copy of it)
 	var own_stream: AudioStream # this voice's private copy of its sound, for native looping (or null)
 	var virtual_pos := 0.0 # while the instance is virtual: where the paused player stopped...
 	var virtual_since := 0.0 # ...and the instance's _time then
@@ -122,6 +129,7 @@ class Scattered:
 	var gain := 1.0
 	var pitch := 1.0
 	var offset: Variant = null # Vector2 / Vector3 from the event's position, null when not spatial
+	var stream: AudioStream
 	var virtual_pos := 0.0
 	var virtual_since := 0.0
 
@@ -910,6 +918,7 @@ func _trigger(instrument: ChirpInstrument, offset := 0.0) -> Voice:
 func _start_player(voice: Voice, offset: float, stream: AudioStream) -> bool:
 	if stream == null:
 		return false
+	voice.stream = stream
 	voice.own_stream = _own_copy(stream, voice.instrument.loop, _has_loop_regions())
 	if voice.own_stream:
 		stream = voice.own_stream
@@ -926,6 +935,7 @@ func _start_player(voice: Voice, offset: float, stream: AudioStream) -> bool:
 	player.finished.connect(_on_voice_finished.bind(voice))
 	player.play(_shifted(offset, voice.start_shift, stream.get_length()))
 	_hold_if_virtual(voice, player)
+	sound_played.emit(voice.instrument, voice.stream)
 	return true
 
 
@@ -1137,6 +1147,7 @@ func _spawn(voice: Voice) -> void:
 	sound.gain = db_to_linear(-randf() * instrument.random_volume_db)
 	sound.pitch = pow(2.0, randf_range(-instrument.random_pitch_semitones, instrument.random_pitch_semitones) / 12.0)
 	sound.offset = _scatter_offset(instrument)
+	sound.stream = stream
 	sound.player = _new_player(stream)
 	voice.scattered.append(sound)
 	voice.spawned += 1
@@ -1144,6 +1155,7 @@ func _spawn(voice: Voice) -> void:
 	sound.player.finished.connect(_on_scattered_finished.bind(voice, sound))
 	sound.player.play(_shifted(0.0, _start_shift(instrument), stream.get_length()))
 	_hold_if_virtual(sound, sound.player)
+	sound_played.emit(instrument, stream)
 
 
 ## A random offset between the instrument's scatter distances, in any direction.
@@ -1162,6 +1174,7 @@ func _scatter_offset(instrument: ChirpInstrument) -> Variant:
 
 
 func _on_scattered_finished(voice: Voice, sound: Scattered) -> void:
+	sound_stopped.emit(voice.instrument, sound.stream)
 	voice.scattered.erase(sound)
 	if is_instance_valid(sound.player):
 		sound.player.queue_free()
@@ -1198,6 +1211,7 @@ func _start_child(voice: Voice, offset: float) -> bool:
 	child.set_paused(_applied_paused)
 	_voices.append(voice)
 	_apply(voice, _automation(ChirpAutomation.Target.VOLUME), _automation(ChirpAutomation.Target.PITCH))
+	sound_played.emit(voice.instrument, null)
 	return true
 
 
@@ -1253,10 +1267,13 @@ func _stop_voice(voice: Voice) -> void:
 		if is_instance_valid(sound.player):
 			sound.player.stop()
 			sound.player.queue_free()
+		sound_stopped.emit(voice.instrument, sound.stream)
 	voice.scattered.clear()
 
 
 func _remove_voice(voice: Voice) -> void:
+	if voice.player or voice.child:
+		sound_stopped.emit(voice.instrument, voice.stream)
 	_voices.erase(voice)
 	if voice.entry >= 0 and _entry_voices.get(voice.entry) == voice:
 		_entry_voices.erase(voice.entry)

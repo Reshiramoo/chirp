@@ -113,6 +113,26 @@ Emitted when [start()](#method-start) is called on an instance that is already p
 
 ---
 
+<a id="signal-sound_played"></a>
+### sound_played(instrument: [ChirpInstrument](ChirpInstrument.md), stream: AudioStream)
+
+Emitted when one of the event's sounds starts: an instrument's sound, with the stream it picked
+from its playlist (the original resource, even when Chirp plays a looping copy of it); each sound
+a scatterer spawns; or a nested event (`stream` is `null`). A looping sound emits it once, not on
+every pass. Use it for subtitles or lip sync on dialogue playlists, or to flash a light per drum
+hit layer.
+
+---
+
+<a id="signal-sound_stopped"></a>
+### sound_stopped(instrument: [ChirpInstrument](ChirpInstrument.md), stream: AudioStream)
+
+Emitted when a sound from [sound_played](#signal-sound_played) ends by itself, is cut (its
+condition, the playhead leaving its block, a transition), or stops with the instance. Same
+arguments.
+
+---
+
 <a id="signal-started"></a>
 ### started()
 
