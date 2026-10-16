@@ -106,6 +106,7 @@ func apply_config(new_config: ChirpConfig) -> void:
 	config = new_config
 	parameters._configure(config.global_parameters)
 	mixer._configure(config.vcas, config.bus_automations, config.snapshots)
+	mixer._configure_duckings(config.duckings)
 
 
 ## Shortcut for [code]Chirp.events.create_instance()[/code].

@@ -32,13 +32,17 @@ the editor preview removes its pool when it goes idle.
 
 | Return | Signature |
 |---|---|
+| void | [add_ducking](#method-add_ducking)(ducking: [ChirpDucking](ChirpDucking.md)) |
 | Array[[ChirpSnapshotInstance](ChirpSnapshotInstance.md)] | [get_active_snapshots](#method-get_active_snapshots)() |
+| float | [get_bus_duck_db](#method-get_bus_duck_db)(bus_path: String) |
 | float | [get_bus_volume](#method-get_bus_volume)(bus_path: String) |
+| float | [get_ducking_level](#method-get_ducking_level)(ducking: [ChirpDucking](ChirpDucking.md)) |
 | Vector2i | [get_effect_bus_usage](#method-get_effect_bus_usage)() |
 | float | [get_vca_volume](#method-get_vca_volume)(vca_name: String) |
 | bool | [is_live](#method-is_live)() |
 | void | [mute_all](#method-mute_all)(mute: bool) |
 | void | [pause_all](#method-pause_all)(paused: bool) |
+| void | [remove_ducking](#method-remove_ducking)(ducking: [ChirpDucking](ChirpDucking.md)) |
 | StringName | [resolve_bus](#method-resolve_bus)(bus_path: String) |
 | void | [set_bus_mute](#method-set_bus_mute)(bus_path: String, mute: bool) |
 | void | [set_bus_paused](#method-set_bus_paused)(bus_path: String, paused: bool) |
@@ -58,10 +62,26 @@ the editor preview removes its pool when it goes idle.
 
 ## Method Descriptions
 
+<a id="method-add_ducking"></a>
+### void add_ducking(ducking: [ChirpDucking](ChirpDucking.md))
+
+Starts applying a [ChirpDucking](ChirpDucking.md). The config's
+[duckings](ChirpConfig.md#property-duckings) are added for you. Adding the same one twice does
+nothing.
+
+---
+
 <a id="method-get_active_snapshots"></a>
 ### Array[[ChirpSnapshotInstance](ChirpSnapshotInstance.md)] get_active_snapshots()
 
 Snapshots that are playing or fading out, in the order they started.
+
+---
+
+<a id="method-get_bus_duck_db"></a>
+### float get_bus_duck_db(bus_path: String)
+
+The dB all duckings are taking off a bus right now (`0.0` when none).
 
 ---
 
@@ -70,6 +90,13 @@ Snapshots that are playing or fading out, in the order they started.
 
 Linear volume set with [set_bus_volume()](#method-set_bus_volume), not counting VCAs, automation
 or snapshots. For a bus Chirp doesn't manage, the AudioServer's current volume.
+
+---
+
+<a id="method-get_ducking_level"></a>
+### float get_ducking_level(ducking: [ChirpDucking](ChirpDucking.md))
+
+How far (`0.0`–`1.0`) the ducking is pulling its bus down right now.
 
 ---
 
@@ -108,6 +135,13 @@ Mutes or unmutes the Master bus.
 
 Pauses or resumes every event, e.g. while an ad is showing. Paused events keep their place: their
 players are paused, and their timelines, envelopes, delays and LFOs stop advancing.
+
+---
+
+<a id="method-remove_ducking"></a>
+### void remove_ducking(ducking: [ChirpDucking](ChirpDucking.md))
+
+Stops applying a ducking; its bus comes back up at once.
 
 ---
 

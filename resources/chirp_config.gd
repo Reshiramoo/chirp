@@ -2,7 +2,7 @@
 @icon("res://addons/chirp/icons/config.svg")
 class_name ChirpConfig
 extends Resource
-## Global parameters, VCAs, snapshots and bus automation.
+## Global parameters, VCAs, snapshots, bus automation and ducking.
 ## Point the "chirp/config" project setting at a saved copy.
 ## Sound directories and background pausing are project settings under "chirp/".
 
@@ -12,3 +12,5 @@ extends Resource
 @export var snapshots: Array[ChirpSnapshot] = []
 ## Global parameters driving bus volumes and effect properties.
 @export var bus_automations: Array[ChirpBusAutomation] = []
+## Buses turned down while others are busy (music under dialogue).
+@export var duckings: Array[ChirpDucking] = []

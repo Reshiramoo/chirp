@@ -35,6 +35,8 @@ var _fx_created := false
 var _fx_free: Array[StringName] = [] # pool buses not lent out
 var _fx_lent := {} # pool bus -> true
 var _event_fx := {} # ChirpEvent instance id -> {bus, effects, count}: EVENT-scope sharing
+var _duckings: Array[ChirpDucking] = []
+var _duck_state := {} # ChirpDucking -> {level: 0..1, held: seconds since the trigger was last busy}
 
 
 func _init(chirp: Node) -> void:
@@ -173,6 +175,72 @@ func is_live() -> bool:
 
 
 ## Pool effect buses currently lent to events, and the pool's size (0 before first use).
+# --- ducking ---------------------------------------------------------------------------
+
+## Adds a ducking at runtime (config duckings are added on start).
+func add_ducking(ducking: ChirpDucking) -> void:
+	if ducking == null or _duckings.has(ducking):
+		return
+	_duckings.append(ducking)
+	_duck_state[ducking] = {level = 0.0, held = INF}
+	_manage_bus(resolve_bus(ducking.target_bus))
+
+
+## Removes a ducking; its bus comes back up at once.
+func remove_ducking(ducking: ChirpDucking) -> void:
+	_duckings.erase(ducking)
+	_duck_state.erase(ducking)
+	_update()
+
+
+## How far (0..1) [param ducking] is pulling its bus down right now.
+func get_ducking_level(ducking: ChirpDucking) -> float:
+	return _duck_state.get(ducking, {}).get("level", 0.0)
+
+
+## dB the duckings are taking off a bus right now (0.0 when none).
+func get_bus_duck_db(bus_path: String) -> float:
+	var bus := resolve_bus(bus_path)
+	var db := 0.0
+	for ducking in _duckings:
+		if resolve_bus(ducking.target_bus) == bus:
+			db += ducking.amount_db * _duck_state[ducking].level
+	return db
+
+
+func _configure_duckings(duckings: Array[ChirpDucking]) -> void:
+	for ducking in _duckings.duplicate():
+		remove_ducking(ducking)
+	for ducking in duckings:
+		add_ducking(ducking)
+	_update()
+
+
+func _step_duckings(delta: float) -> void:
+	for ducking in _duckings:
+		var state: Dictionary = _duck_state[ducking]
+		if _ducking_triggered(ducking):
+			state.held = 0.0
+		else:
+			state.held += delta
+		if state.held <= ducking.hold:
+			state.level = minf(state.level + delta / ducking.attack, 1.0) if ducking.attack > 0.0 else 1.0
+		else:
+			state.level = maxf(state.level - delta / ducking.release, 0.0) if ducking.release > 0.0 else 0.0
+
+
+func _ducking_triggered(ducking: ChirpDucking) -> bool:
+	var bus := resolve_bus(ducking.trigger_bus)
+	if ducking.trigger == ChirpDucking.Trigger.LEVEL:
+		var index := AudioServer.get_bus_index(bus)
+		var peak := maxf(AudioServer.get_bus_peak_volume_left_db(index, 0), AudioServer.get_bus_peak_volume_right_db(index, 0))
+		return peak > ducking.threshold_db
+	for instance: ChirpEventInstance in _chirp.events.get_active_instances():
+		if instance.is_playing() and not instance._applied_paused and _bus_is_under(instance._bus, bus):
+			return true
+	return false
+
+
 func get_effect_bus_usage() -> Vector2i:
 	return Vector2i(_fx_lent.size(), _fx_lent.size() + _fx_free.size())
 
@@ -206,6 +274,7 @@ func _configure(vcas: Array[ChirpVCA], bus_automations: Array[ChirpBusAutomation
 func _process(delta: float) -> void:
 	for instance in _snapshot_instances.duplicate():
 		instance._process(delta)
+	_step_duckings(delta)
 	_update()
 
 
@@ -254,6 +323,9 @@ func _update_bus_volume(bus: StringName, active: Array) -> void:
 					db = lerpf(db, override.volume_db, weight)
 				else:
 					db += override.volume_db * weight
+	for ducking in _duckings:
+		if resolve_bus(ducking.target_bus) == bus:
+			db += ducking.amount_db * _duck_state[ducking].level
 	AudioServer.set_bus_volume_db(index, maxf(db, -80.0))
 
 

@@ -2,7 +2,7 @@
 
 **Inherits:** [Resource](https://docs.godotengine.org/en/stable/classes/class_resource.html)
 
-Global parameters, VCAs, snapshots and bus automation.
+Global parameters, VCAs, snapshots, bus automation and ducking.
 
 ## Description
 
@@ -22,6 +22,7 @@ Sound directories and background pausing are project settings, not part of the c
 | Type | Name | Default |
 |---|---|---|
 | Array[[ChirpBusAutomation](ChirpBusAutomation.md)] | [bus_automations](#property-bus_automations) | `[]` |
+| Array[[ChirpDucking](ChirpDucking.md)] | [duckings](#property-duckings) | `[]` |
 | Array[[ChirpParameter](ChirpParameter.md)] | [global_parameters](#property-global_parameters) | `[]` |
 | Array[[ChirpSnapshot](ChirpSnapshot.md)] | [snapshots](#property-snapshots) | `[]` |
 | Array[[ChirpVCA](ChirpVCA.md)] | [vcas](#property-vcas) | `[]` |
@@ -32,6 +33,14 @@ Sound directories and background pausing are project settings, not part of the c
 ### Array[[ChirpBusAutomation](ChirpBusAutomation.md)] bus_automations = `[]`
 
 Global parameters driving bus volumes and effect properties.
+
+---
+
+<a id="property-duckings"></a>
+### Array[[ChirpDucking](ChirpDucking.md)] duckings = `[]`
+
+Buses turned down while others are busy (music under dialogue). See
+[ChirpDucking](ChirpDucking.md).
 
 ---
 

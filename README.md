@@ -9,7 +9,7 @@ No native libraries, so it runs anywhere Godot does (desktop, Android, iOS, web)
   listener (distance, direction, speed), driving volume and pitch through curves.
 - **Timelines** for interactive music: loop regions, sustain points, transitions quantized to
   beats or bars, tempo markers and beat signals.
-- **Mixing**: bus volumes, VCAs, snapshots (pause muffle, ducking), bus automation, pausing by bus.
+- **Mixing**: bus volumes, VCAs, snapshots (pause muffle), ducking (music under dialogue), bus automation, pausing by bus.
 - **Emitters**: drop-in 2D/3D nodes that play on ready, on contact, on click, and so on.
 - **Editor tools**: an event browser, a preview dock with live parameter sliders, a visual timeline
   editor and attenuation gizmos.
@@ -50,7 +50,7 @@ No native libraries, so it runs anywhere Godot does (desktop, Android, iOS, web)
    | Setting | Type | Default | Meaning |
    |---|---|---|---|
    | `chirp/sound_directories` | `Dictionary[String, String]` | `{"res://audio": ""}` | Folders to find sounds in, each mapped to a bus path (`""` = Master). |
-   | `chirp/config` | `String` | `"res://audio/chirp_config.tres"` | Optional [ChirpConfig](docs/classes/ChirpConfig.md) holding global parameters, VCAs, snapshots and bus automation. |
+   | `chirp/config` | `String` | `"res://audio/chirp_config.tres"` | Optional [ChirpConfig](docs/classes/ChirpConfig.md) holding global parameters, VCAs, snapshots, bus automation and ducking. |
    | `chirp/pause_on_app_background` | `bool` | `true` | Pause every event while a mobile app is in the background. |
    | `chirp/effect_bus_pool_size` | `int` | `8` | Buses lent to events with effects (see [Effects per event](#effects-per-event)). |
 
@@ -365,7 +365,7 @@ The emitter gizmos show the min and max distances.
 ## Mixing
 
 Chirp recomputes every bus it manages each frame: base volume × VCAs × bus automation, then
-snapshots by priority. Effect properties start from the value they had when Chirp first touched
+snapshots by priority, then ducking. Effect properties start from the value they had when Chirp first touched
 them. Buses Chirp never touches are left alone.
 
 ### VCAs
@@ -390,6 +390,14 @@ bus's volume, set one property of one of its effects (e.g. `cutoff_hz` of a low-
 switch that effect on while active. `OVERRIDE` mode moves toward the value as intensity rises;
 `BLEND` adds it. Higher `priority` snapshots apply last. An optional `envelope` fades the snapshot
 in and out, and `intensity_parameter` lets a global parameter drive its strength.
+
+### Ducking
+
+A [ChirpDucking](docs/classes/ChirpDucking.md) turns one bus down while another is busy: music
+under dialogue, ambience under an explosion. Add them to the ChirpConfig's `duckings`, or with
+`Chirp.mixer.add_ducking()`. The trigger is either *events* (any event playing on the trigger bus)
+or *level* (the trigger bus's actual loudness, so the music swells back in the pauses between
+lines). `attack`, `hold` and `release` shape how it moves.
 
 ### Bus automation
 
@@ -481,7 +489,7 @@ One page per class, in the layout of Godot's class reference.
 |---|---|---|
 | [Chirp](docs/classes/Chirp.md) | Node | The autoload: entry point, shortcuts, settings and config. |
 | [ChirpEvents](docs/classes/ChirpEvents.md) (`Chirp.events`) | RefCounted | Event registry, instances, one-shots, voice limits. |
-| [ChirpMixer](docs/classes/ChirpMixer.md) (`Chirp.mixer`) | RefCounted | Buses, VCAs, snapshots, bus automation, pausing. |
+| [ChirpMixer](docs/classes/ChirpMixer.md) (`Chirp.mixer`) | RefCounted | Buses, VCAs, snapshots, bus automation, ducking, pausing. |
 | [ChirpParameters](docs/classes/ChirpParameters.md) (`Chirp.parameters`) | RefCounted | Global parameters. |
 | [ChirpEventInstance](docs/classes/ChirpEventInstance.md) | RefCounted | One playback of an event. |
 | [ChirpSnapshotInstance](docs/classes/ChirpSnapshotInstance.md) | RefCounted | One active snapshot. |
@@ -497,11 +505,12 @@ One page per class, in the layout of Godot's class reference.
 | [ChirpLFO](docs/classes/ChirpLFO.md) | Resource | Oscillator on an event's volume or pitch. |
 | [ChirpEnvelope](docs/classes/ChirpEnvelope.md) | Resource | AHDSR envelope for events and snapshots. |
 | [ChirpMarker](docs/classes/ChirpMarker.md) | Resource | Markers, tempo, loops, sustain points and transitions on a timeline. |
-| [ChirpConfig](docs/classes/ChirpConfig.md) | Resource | Global parameters, VCAs, snapshots and bus automation. |
+| [ChirpConfig](docs/classes/ChirpConfig.md) | Resource | Global parameters, VCAs, snapshots, bus automation and ducking. |
 | [ChirpSnapshot](docs/classes/ChirpSnapshot.md) | Resource | A mixer state blended in while active. |
 | [ChirpBusOverride](docs/classes/ChirpBusOverride.md) | Resource | One change a snapshot makes to a bus. |
 | [ChirpBusAutomation](docs/classes/ChirpBusAutomation.md) | Resource | Global parameter → bus volume or effect property. |
 | [ChirpVCA](docs/classes/ChirpVCA.md) | Resource | A volume control over several buses. |
+| [ChirpDucking](docs/classes/ChirpDucking.md) | Resource | Turns one bus down while another is busy. |
 
 **Nodes**
 
