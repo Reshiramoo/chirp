@@ -77,6 +77,9 @@ enum Stealing {
 ## 0 = unlimited.
 @export_range(0, 64) var max_instances := 0
 @export var stealing := Stealing.OLDEST
+## Over the voice budget ("chirp/max_voices"), higher priorities keep their sounds first; equal
+## priorities go by loudness at the listener.
+@export_range(-10, 10) var priority := 0
 ## Minimum time between starts of this event.
 @export_range(0.0, 10.0, 0.01, "or_greater", "suffix:s") var cooldown := 0.0
 

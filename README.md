@@ -23,6 +23,7 @@ No native libraries, so it runs anywhere Godot does (desktop, Android, iOS, web)
 - [Playing events from code](#playing-events-from-code)
   - [Loading](#loading)
 - [Instances and their lifecycle](#instances-and-their-lifecycle)
+  - [Voice budget and virtual instances](#voice-budget-and-virtual-instances)
 - [Parameters](#parameters)
 - [Timelines and interactive music](#timelines-and-interactive-music)
 - [Parameter sheets](#parameter-sheets)
@@ -53,6 +54,8 @@ No native libraries, so it runs anywhere Godot does (desktop, Android, iOS, web)
    | `chirp/config` | `String` | `"res://audio/chirp_config.tres"` | Optional [ChirpConfig](docs/classes/ChirpConfig.md) holding global parameters, VCAs, snapshots, bus automation and ducking. |
    | `chirp/pause_on_app_background` | `bool` | `true` | Pause every event while a mobile app is in the background. |
    | `chirp/effect_bus_pool_size` | `int` | `8` | Buses lent to events with effects (see [Effects per event](#effects-per-event)). |
+   | `chirp/max_voices` | `int` | `0` | Most sounds playing at once; `0` = no limit (see [Voice budget](#voice-budget-and-virtual-instances)). |
+   | `chirp/virtualize_below_db` | `float` | `-80.0` | Instances quieter than this at the listener go virtual; `-120` turns it off. |
 
    For example, for sounds in `res://assets/sounds/bgms` and `res://assets/sounds/sfxs`:
    ```
@@ -118,6 +121,7 @@ A ChirpEvent is a list of [ChirpInstrument](docs/classes/ChirpInstrument.md)s pl
 | `modulators` | [ChirpLFO](docs/classes/ChirpLFO.md): sine, triangle, square, saw or random waves on volume or pitch, in Hz or synced to the tempo. |
 | `envelope` | [ChirpEnvelope](docs/classes/ChirpEnvelope.md) (AHDSR). `release` is the fade-out used by `stop()`. |
 | `max_instances` / `stealing` / `cooldown` | Voice limits: steal oldest, quietest, furthest, or refuse. |
+| `priority` | Who keeps playing when the [voice budget](#voice-budget-and-virtual-instances) runs out. |
 | `rolloff` / `min_distance` / `max_distance` | Distance roll-off: Godot's, or linear, inverse, tapered or a custom curve (see [Listeners and roll-off](#listeners-and-roll-off)). |
 
 ### Scatterer and programmer instruments
@@ -204,6 +208,24 @@ music.started.connect(func(): print("music on"))
 music.stopped.connect(_on_music_stopped)
 music.start()
 ```
+
+### Voice budget and virtual instances
+
+Every sound playing costs mixing time, which adds up on phones. Two project settings keep it down
+without cutting anything off:
+
+- `chirp/max_voices` (default `0`, no limit): the most sounds playing at once. Over it, the least
+  important instances go **virtual**: their sounds pause, but the instance keeps running
+  (timeline, parameters, signals). When there's room again they pick up where they would be by
+  then, as if they'd played all along; one-shots that would have ended meanwhile end. Importance
+  is the event's `priority`, then how loud the instance is at the listener (its volume and
+  distance). Nested events count with the instance that plays them.
+- `chirp/virtualize_below_db` (default `-80`): instances quieter than this at the listener go
+  virtual even under the budget: distant 3D sounds, faded-out layers. `-120` turns it off.
+
+`instance.is_virtual()` and the `virtual_changed` signal tell you when it happens;
+`Chirp.events.get_voice_usage()` returns `{real, virtual, limit}`. Both settings can be changed at
+runtime through `Chirp.events.max_voices` and `Chirp.events.virtualize_below_db`.
 
 ## Parameters
 

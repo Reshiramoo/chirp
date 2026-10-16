@@ -19,6 +19,9 @@ signal timeline_beat(bar: int, beat: int, position: float, tempo: float, time_si
 ## A PROGRAMMER instrument is about to play and asks for its sound. Emitted synchronously:
 ## call set_programmer_sound(key, stream) from the handler to supply it.
 signal programmer_sound_requested(key: String, instrument: ChirpInstrument)
+## Emitted when the instance goes virtual (over the voice budget, or too quiet to hear) or comes
+## back. See is_virtual().
+signal virtual_changed(virtual: bool)
 
 enum State { STOPPED, PLAYING, STOPPING }
 
@@ -79,6 +82,8 @@ var _jumped := false # the playhead jumped this frame
 var _entry_voices := {} # timeline / parameter sheet instrument index -> Voice
 var _entry_done := {} # instrument index -> true once triggered (until it leaves its range)
 var _quantized := {} # timeline entry index -> playhead time a quantized instrument waits for
+var _virtual := false # players paused to save the mixer's work; the instance keeps running
+var _parent_id := 0 # nested events: the instance playing this one
 var _processed_usec := 0 # when the playhead last moved, for the audible position between frames
 var _beat_waiters: Array[Dictionary] = [] # call_on_beat(): {callback, bar_only, audible}
 
@@ -99,6 +104,8 @@ class Voice:
 	var fade := 1.0 # PARAMETER sheets: crossfade gain, kept at its last value once detached
 	var start_shift := 0.0 # seconds the sound runs ahead of its timeline position (start offsets)
 	var own_stream: AudioStream # this voice's private copy of its sound, for native looping (or null)
+	var virtual_pos := 0.0 # while the instance is virtual: where the paused player stopped...
+	var virtual_since := 0.0 # ...and the instance's _time then
 	var base_loop := {} # own_stream's loop settings outside loop regions
 	var region: Timeline.Mark # the loop region own_stream currently loops natively, if any
 
@@ -109,6 +116,8 @@ class Scattered:
 	var gain := 1.0
 	var pitch := 1.0
 	var offset: Variant = null # Vector2 / Vector3 from the event's position, null when not spatial
+	var virtual_pos := 0.0
+	var virtual_since := 0.0
 
 
 class Pending:
@@ -404,6 +413,8 @@ func _process(delta: float) -> void:
 		_arm_region_loops()
 	elif _event.sheet_mode == ChirpEvent.SheetMode.PARAMETER:
 		_sync_sheet()
+	if _virtual:
+		_finish_virtual_sounds()
 	for voice in _voices.duplicate():
 		if not _voices.has(voice):
 			continue # removed by an earlier voice this frame
@@ -830,7 +841,7 @@ func _start_player(voice: Voice, offset: float, stream: AudioStream) -> bool:
 	_apply(voice, _automation(ChirpAutomation.Target.VOLUME), _automation(ChirpAutomation.Target.PITCH))
 	player.finished.connect(_on_voice_finished.bind(voice))
 	player.play(_shifted(offset, voice.start_shift, stream.get_length()))
-	player.stream_paused = _applied_paused
+	_hold_if_virtual(voice, player)
 	return true
 
 
@@ -1048,7 +1059,7 @@ func _spawn(voice: Voice) -> void:
 	_apply(voice, _automation(ChirpAutomation.Target.VOLUME), _automation(ChirpAutomation.Target.PITCH))
 	sound.player.finished.connect(_on_scattered_finished.bind(voice, sound))
 	sound.player.play(_shifted(0.0, _start_shift(instrument), stream.get_length()))
-	sound.player.stream_paused = _applied_paused
+	_hold_if_virtual(sound, sound.player)
 
 
 ## A random offset between the instrument's scatter distances, in any direction.
@@ -1089,6 +1100,7 @@ func _start_child(voice: Voice, offset: float) -> bool:
 	child._attenuation = _attenuation
 	child._send_to = _output_bus() # nested events play into this event's effects
 	child._programmer_sounds = _programmer_sounds
+	child._parent_id = get_instance_id()
 	child.programmer_sound_requested.connect(programmer_sound_requested.emit)
 	voice.child = child
 	_link_parameters(child)
@@ -1119,6 +1131,7 @@ func _on_voice_finished(voice: Voice) -> void:
 		return
 	if voice.player and voice.instrument.loop and not voice.detached and _state == State.PLAYING:
 		voice.player.play()
+		_hold_if_virtual(voice, voice.player)
 		return
 	_remove_voice(voice)
 	if voice.player:
@@ -1463,16 +1476,158 @@ func _sync_pause() -> void:
 	_applied_paused = paused
 	for voice in _voices:
 		if voice.player:
-			voice.player.stream_paused = paused
+			voice.player.stream_paused = paused or _virtual
 		elif voice.child:
 			voice.child.set_paused(paused)
 		for sound in voice.scattered:
 			if is_instance_valid(sound.player):
-				sound.player.stream_paused = paused
+				sound.player.stream_paused = paused or _virtual
+
+
+# --- virtualization --------------------------------------------------------------------
+
+## True while the instance is virtual: its sounds are paused to save the mixer's work (over the
+## voice budget, or too quiet to hear), but it keeps running: timeline, parameters, signals. When it
+## comes back, its sounds pick up where they would be by then.
+func is_virtual() -> bool:
+	return _virtual
+
+
+## Roughly how loud the instance is at the listener (linear): its level, and distance attenuation
+## for 2D/3D events. Ranks instances for the voice budget.
+func get_audibility() -> float:
+	var level := _get_level()
+	if _spatial == Spatial.NONE or _position == null:
+		return level
+	var distance: float = _chirp.events._listener_distance(self)
+	if _uses_rolloff():
+		return level * _rolloff_at(distance)
+	if _spatial == Spatial.SPATIAL_2D:
+		var far: float = _attenuation.get("max_distance", _event.max_distance_2d)
+		if far <= 0.0 or distance >= far:
+			return 0.0
+		return level * pow(1.0 - distance / far, _attenuation.get("attenuation", _event.attenuation_2d))
+	var unit: float = _attenuation.get("unit_size", _event.unit_size_3d)
+	var reach: float = _attenuation.get("max_distance", _event.max_distance_3d)
+	if reach > 0.0 and distance >= reach:
+		return 0.0
+	return level * minf(unit / maxf(distance, 0.0001), 1.0)
+
+
+## Players held by this instance (its own, not nested events').
+func _player_count() -> int:
+	var count := 0
+	for voice in _voices:
+		if voice.player:
+			count += 1
+		count += voice.scattered.size()
+	return count
+
+
+func _set_virtual(virtual: bool) -> void:
+	if virtual == _virtual:
+		return
+	_virtual = virtual
+	for voice in _voices:
+		if voice.player:
+			_virtualize_player(voice, voice.player, virtual)
+		for sound in voice.scattered:
+			if is_instance_valid(sound.player):
+				_virtualize_player(sound, sound.player, virtual)
+	if not virtual:
+		_catch_up_voices()
+	virtual_changed.emit(virtual)
+
+
+func _virtualize_player(holder: Object, player: Node, virtual: bool) -> void:
+	if virtual:
+		holder.virtual_pos = player.get_playback_position()
+		holder.virtual_since = _time
+		player.stream_paused = true
+	else:
+		player.stream_paused = _applied_paused
+
+
+## A player started while the instance is virtual starts paused (and is caught up later).
+func _hold_if_virtual(holder: Object, player: Node) -> void:
+	if _virtual:
+		holder.virtual_pos = player.get_playback_position()
+		holder.virtual_since = _time
+	player.stream_paused = _applied_paused or _virtual
+
+
+## Where a paused player would be now, in seconds into its stream; -1 once a one-shot would have
+## ended.
+func _virtual_position(holder: Object, player: Node) -> float:
+	var stream: AudioStream = player.stream
+	var length := stream.get_length() if stream else 0.0
+	var position: float = holder.virtual_pos + (_time - holder.virtual_since) * holder.pitch * pitch
+	if length <= 0.0:
+		return position
+	if _player_loops(player):
+		var loop_start := 0.0
+		if stream is AudioStreamWAV and stream.loop_mode != AudioStreamWAV.LOOP_DISABLED:
+			loop_start = stream.loop_begin / float(stream.mix_rate)
+			length = minf(length, stream.loop_end / float(stream.mix_rate)) if stream.loop_end > 0 else length
+		elif stream.get("loop_offset") != null:
+			loop_start = stream.get("loop_offset")
+		if position >= length and length > loop_start:
+			position = loop_start + fposmod(position - loop_start, length - loop_start)
+		return position
+	return position if position < length else -1.0
+
+
+static func _player_loops(player: Node) -> bool:
+	var stream: AudioStream = player.stream
+	if stream is AudioStreamWAV:
+		return stream.loop_mode != AudioStreamWAV.LOOP_DISABLED
+	return stream != null and stream.get("loop") == true
+
+
+## While virtual: one-shot sounds that would have ended by now finish, as if heard.
+func _finish_virtual_sounds() -> void:
+	for voice in _voices.duplicate():
+		if not _voices.has(voice):
+			continue
+		for sound in voice.scattered.duplicate():
+			if is_instance_valid(sound.player) and _virtual_position(sound, sound.player) < 0.0:
+				_on_scattered_finished(voice, sound)
+		if voice.player and is_instance_valid(voice.player) and _virtual_position(voice, voice.player) < 0.0:
+			_on_voice_finished(voice) # (a looping instrument restarts, still held)
+
+
+## Coming back: each paused player jumps to where it would be by now. Timeline voices follow the
+## playhead exactly (loops and jumps included).
+func _catch_up_voices() -> void:
+	for voice in _voices.duplicate():
+		if not _voices.has(voice):
+			continue
+		for sound in voice.scattered.duplicate():
+			if is_instance_valid(sound.player):
+				sound.player.seek(maxf(_virtual_position(sound, sound.player), 0.0))
+		if voice.player == null or not is_instance_valid(voice.player):
+			continue
+		var entry := _timeline_entry(voice)
+		if entry and not voice.instrument.async_playback:
+			_resync(voice, _playhead - entry.start)
+		else:
+			voice.player.seek(maxf(_virtual_position(voice, voice.player), 0.0))
+
+
+func _timeline_entry(voice: Voice) -> Timeline.Entry:
+	if _timeline == null or voice.entry < 0 or voice.detached:
+		return null
+	for entry in _timeline.entries:
+		if entry.index == voice.entry:
+			return entry
+	return null
 
 
 func _finish_stop() -> void:
 	_clear_voices()
+	if _virtual:
+		_virtual = false
+		virtual_changed.emit(false)
 	_pending.clear()
 	_release_effects()
 	if _timeline:

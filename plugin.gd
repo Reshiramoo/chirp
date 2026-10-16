@@ -34,6 +34,9 @@ func _enter_tree() -> void:
 	_add_setting(ChirpScript.SETTING_PAUSE_IN_BACKGROUND, true, TYPE_BOOL)
 	_add_setting(ChirpScript.Mixer.SETTING_EFFECT_POOL, ChirpScript.Mixer.DEFAULT_EFFECT_POOL,
 		TYPE_INT, PROPERTY_HINT_RANGE, "0,64")
+	_add_setting(ChirpScript.Events.SETTING_MAX_VOICES, 0, TYPE_INT, PROPERTY_HINT_RANGE, "0,256,1,or_greater")
+	_add_setting(ChirpScript.Events.SETTING_VIRTUALIZE_BELOW_DB, ChirpScript.Events.DEFAULT_VIRTUALIZE_BELOW_DB,
+		TYPE_FLOAT, PROPERTY_HINT_RANGE, "-120,0,0.1,suffix:dB")
 
 	_preview_chirp = ChirpScript.new()
 	_preview_chirp.preview = true

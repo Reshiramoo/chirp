@@ -34,7 +34,9 @@ Every method that takes `event_or_path` accepts a [ChirpEvent](ChirpEvent.md) or
 
 | Type | Name | Default |
 |---|---|---|
+| int | [max_voices](#property-max_voices) | `0` |
 | Callable | [programmer_sound_provider](#property-programmer_sound_provider) | `Callable()` |
+| float | [virtualize_below_db](#property-virtualize_below_db) | `-80.0` |
 
 ## Methods
 
@@ -46,6 +48,7 @@ Every method that takes `event_or_path` accepts a [ChirpEvent](ChirpEvent.md) or
 | float | [get_preload_progress](#method-get_preload_progress)() |
 | String | [get_event_file](#method-get_event_file)(event_path: String) |
 | PackedStringArray | [get_event_paths](#method-get_event_paths)() |
+| Dictionary | [get_voice_usage](#method-get_voice_usage)() |
 | bool | [is_event_loaded](#method-is_event_loaded)(event_path: String) |
 | bool | [is_preloading](#method-is_preloading)() |
 | [ChirpEventInstance](ChirpEventInstance.md) | [play_one_shot](#method-play_one_shot)(event_or_path: Variant, position: Variant = null) |
@@ -74,6 +77,16 @@ awaited right after the call.
 
 ## Property Descriptions
 
+<a id="property-max_voices"></a>
+### int max_voices = `0`
+
+Most sounds playing at once; `0` = no limit. Over it, the least important instances go virtual
+(see [ChirpEventInstance.is_virtual()](ChirpEventInstance.md#method-is_virtual)): by
+[ChirpEvent.priority](ChirpEvent.md#property-priority), then loudness at the listener. Read from
+the `chirp/max_voices` project setting on start.
+
+---
+
 <a id="property-programmer_sound_provider"></a>
 ### Callable programmer_sound_provider = `Callable()`
 
@@ -87,6 +100,14 @@ Chirp.events.programmer_sound_provider = func(key: String, _instance: ChirpEvent
 	return load("res://voice/%s/%s.ogg" % [TranslationServer.get_locale(), key])
 Chirp.play_one_shot("event:/voice/bark") # its programmer instrument's key picks the file
 ```
+
+---
+
+<a id="property-virtualize_below_db"></a>
+### float virtualize_below_db = `-80.0`
+
+Instances quieter than this at the listener go virtual even under the budget. `-120` or lower
+turns it off. Read from the `chirp/virtualize_below_db` project setting on start.
 
 ## Method Descriptions
 
@@ -145,6 +166,14 @@ Progress of the current threaded preloads, 0..1, for a loading bar. `1.0` when n
 ### PackedStringArray get_event_paths()
 
 Every known event path, from the sound directories and [register_event()](#method-register_event).
+
+---
+
+<a id="method-get_voice_usage"></a>
+### Dictionary get_voice_usage()
+
+Sounds playing right now: `{real, virtual, limit}`. `real` are being mixed, `virtual` are paused
+waiting for room or for being loud enough, `limit` is [max_voices](#property-max_voices).
 
 ---
 

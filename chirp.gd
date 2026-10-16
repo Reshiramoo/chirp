@@ -74,6 +74,9 @@ func reload_settings() -> void:
 	if ResourceLoader.exists(path):
 		loaded = load(path) as ChirpConfig
 	apply_config(loaded if loaded else ChirpConfig.new())
+	events.max_voices = ProjectSettings.get_setting(Events.SETTING_MAX_VOICES, 0)
+	events.virtualize_below_db = ProjectSettings.get_setting(Events.SETTING_VIRTUALIZE_BELOW_DB,
+		Events.DEFAULT_VIRTUALIZE_BELOW_DB)
 	events.scan(ProjectSettings.get_setting(SETTING_SOUND_DIRECTORIES, DEFAULT_SOUND_DIRECTORIES))
 
 

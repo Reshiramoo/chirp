@@ -47,6 +47,7 @@ footsteps.start()
 |---|---|
 | void | [attach_to](#method-attach_to)(node: Node) |
 | void | [call_on_beat](#method-call_on_beat)(callback: Callable, quantization: [Quantization](ChirpMarker.md#enum-quantization) = BEAT, audible: bool = true) |
+| float | [get_audibility](#method-get_audibility)() |
 | float | [get_audible_position](#method-get_audible_position)() |
 | float | [get_bar_phase](#method-get_bar_phase)(audible: bool = true) |
 | float | [get_bar_position](#method-get_bar_position)(audible: bool = true) |
@@ -61,6 +62,7 @@ footsteps.start()
 | bool | [is_playing](#method-is_playing)() |
 | bool | [is_sustaining](#method-is_sustaining)() |
 | bool | [is_valid](#method-is_valid)() |
+| bool | [is_virtual](#method-is_virtual)() |
 | void | [key_off](#method-key_off)() |
 | void | [release](#method-release)() |
 | void | [set_attenuation_2d](#method-set_attenuation_2d)(max_distance: float, attenuation: float) |
@@ -148,6 +150,14 @@ music.timeline_beat.connect(func(bar: int, beat: int, _position: float, _tempo: 
 TIMELINE events: the playhead passed a MARKER. `position` is in seconds. Markers skipped by a jump
 don't fire.
 
+---
+
+<a id="signal-virtual_changed"></a>
+### virtual_changed(virtual: bool)
+
+Emitted when the instance goes virtual or comes back (see [is_virtual()](#method-is_virtual)).
+Also emitted with `false` when a virtual instance stops.
+
 ## Enumerations
 
 <a id="enum-state"></a>
@@ -213,6 +223,15 @@ heard. Forgotten if the instance stops first. Needs a TEMPO marker.
 ```gdscript
 music.call_on_beat(func(_bar, _beat): spawn_enemy(), ChirpMarker.Quantization.BAR)
 ```
+
+---
+
+<a id="method-get_audibility"></a>
+### float get_audibility()
+
+Roughly how loud the instance is at the listener, as a linear gain: its level (event volume,
+[volume](#property-volume), envelope) times its distance attenuation for 2D/3D events. Ranks
+instances for the voice budget.
 
 ---
 
@@ -328,6 +347,16 @@ TIMELINE events: the playhead position in seconds. `0.0` for other events.
 ### bool is_valid()
 
 `false` once the instance has been destroyed (see [release()](#method-release)).
+
+---
+
+<a id="method-is_virtual"></a>
+### bool is_virtual()
+
+True while the instance is virtual: its sounds are paused to save mixing time (over
+`chirp/max_voices`, or quieter than `chirp/virtualize_below_db` at the listener), but it keeps
+running. When it comes back, its sounds pick up where they would be by then. See
+[Voice budget and virtual instances](../../README.md#voice-budget-and-virtual-instances).
 
 ---
 

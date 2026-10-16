@@ -45,6 +45,7 @@ instrument volume × volume [automations](#property-automations) × volume
 | Array[[ChirpLFO](ChirpLFO.md)] | [modulators](#property-modulators) | `[]` |
 | Array[[ChirpParameter](ChirpParameter.md)] | [parameters](#property-parameters) | `[]` |
 | bool | [persistent](#property-persistent) | `false` |
+| int | [priority](#property-priority) | `0` |
 | String | [sheet_parameter](#property-sheet_parameter) | `""` |
 | float | [pitch_scale](#property-pitch_scale) | `1.0` |
 | [Rolloff](#enum-rolloff) | [rolloff](#property-rolloff) | `GODOT` |
@@ -289,6 +290,14 @@ playing or waiting to play.
 ### float pitch_scale = `1.0`
 
 Pitch multiplier for the whole event.
+
+---
+
+<a id="property-priority"></a>
+### int priority = `0`
+
+When more sounds play than `chirp/max_voices`, instances of higher-priority events keep playing
+first; equal priorities go by loudness at the listener. `-10` to `10`.
 
 ---
 

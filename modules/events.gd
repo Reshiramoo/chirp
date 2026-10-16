@@ -18,6 +18,9 @@ extends RefCounted
 signal preload_finished
 
 const EVENT_PREFIX := "event:/"
+const SETTING_MAX_VOICES := "chirp/max_voices"
+const SETTING_VIRTUALIZE_BELOW_DB := "chirp/virtualize_below_db"
+const DEFAULT_VIRTUALIZE_BELOW_DB := -80.0
 const AUDIO_EXTENSIONS: Array[String] = ["wav", "ogg", "mp3"]
 const RESOURCE_EXTENSIONS: Array[String] = ["tres", "res"]
 
@@ -43,6 +46,16 @@ var _preload_signal_queued := false
 ## [code]func(key: String, instance: ChirpEventInstance) -> AudioStream[/code]. E.g. a lookup of
 ## localised dialogue by key.
 var programmer_sound_provider := Callable()
+## Most sounds playing at once; 0 = no limit. Over it, the least important instances go virtual:
+## their sounds pause but they keep running, and pick up where they'd be once there's room.
+## Importance: ChirpEvent.priority, then how loud they are at the listener. Nested events count
+## with the instance that plays them. From the "chirp/max_voices" project setting.
+var max_voices := 0
+## Instances quieter than this at the listener go virtual even under the budget (distant or faded
+## out sounds cost nothing). -120 or lower turns this off. From the "chirp/virtualize_below_db"
+## project setting.
+var virtualize_below_db := DEFAULT_VIRTUALIZE_BELOW_DB
+var _voice_usage := {real = 0, virtual = 0}
 
 
 func _init(chirp: Node) -> void:
@@ -226,6 +239,64 @@ func _process(delta: float) -> void:
 	_update_listeners(delta)
 	for instance in _active.duplicate():
 		instance._process(delta)
+	_update_virtualization()
+
+
+## Sounds playing now: {real, virtual, limit} (limit 0 = none). Virtual ones are paused, waiting
+## for room or for being loud enough.
+func get_voice_usage() -> Dictionary:
+	return {real = _voice_usage.real, virtual = _voice_usage.virtual, limit = max_voices}
+
+
+## Ranks the playing instances (with their nested events) and makes the ones that don't fit the
+## voice budget, or can't be heard, virtual.
+func _update_virtualization() -> void:
+	var families := {} # root instance -> [instances]
+	for instance in _active:
+		if instance._applied_paused or not instance.is_playing():
+			continue
+		var root := _root_of(instance)
+		if not families.has(root):
+			families[root] = []
+		families[root].append(instance)
+	var ranked: Array = families.keys()
+	var audibility := {}
+	for root: ChirpEventInstance in ranked:
+		audibility[root] = root.get_audibility()
+	ranked.sort_custom(func(a: ChirpEventInstance, b: ChirpEventInstance) -> bool:
+		if a._event.priority != b._event.priority:
+			return a._event.priority > b._event.priority
+		if not is_equal_approx(audibility[a], audibility[b]):
+			return audibility[a] > audibility[b]
+		return a._start_order < b._start_order)
+	var real := 0
+	var virtual := 0
+	var quiet := db_to_linear(virtualize_below_db) if virtualize_below_db > -120.0 else -1.0
+	for root: ChirpEventInstance in ranked:
+		var members: Array = families[root]
+		var voices := 0
+		for instance: ChirpEventInstance in members:
+			voices += instance._player_count()
+		# A little hysteresis, so a sound hovering at the threshold doesn't flicker.
+		var threshold := quiet * (1.4 if root._virtual else 1.0)
+		var go_virtual: bool = audibility[root] < threshold or (max_voices > 0 and real + voices > max_voices)
+		if go_virtual:
+			virtual += voices
+		else:
+			real += voices
+		for instance: ChirpEventInstance in members:
+			instance._set_virtual(go_virtual)
+	_voice_usage = {real = real, virtual = virtual}
+
+
+func _root_of(instance: ChirpEventInstance) -> ChirpEventInstance:
+	var root := instance
+	for _i in 16:
+		var parent := instance_from_id(root._parent_id) as ChirpEventInstance if root._parent_id else null
+		if parent == null or not parent.is_playing():
+			break
+		root = parent
+	return root
 
 
 ## The current ChirpListener2D/3D, else the current AudioListener2D/3D, else the current camera.
