@@ -15,6 +15,12 @@ enum Kind {
 	TRANSITION_REGION, ## While the playhead is inside and the condition holds, jump to destination.
 }
 
+enum TransitionMode {
+	CUT, ## Jump at once: the old content stops, the destination's starts.
+	CROSSFADE, ## Jump at once, fading the old content out and the destination's in over transition_length.
+	BRIDGE, ## Hold for transition_length (play a fill in transition_event), fading the old content out, then jump.
+}
+
 enum Quantization {
 	NONE, ## Jump straight away.
 	BEAT, ## Jump on the next beat.
@@ -27,13 +33,15 @@ const _FIELDS := {
 	Kind.LOOP_REGION: ["position", "end", "condition_parameter", "condition_min", "condition_max", "probability"],
 	Kind.SUSTAIN_POINT: ["position", "condition_parameter", "condition_min", "condition_max"],
 	Kind.DESTINATION: ["name", "position"],
-	Kind.TRANSITION: ["position", "destination", "quantization",
-		"condition_parameter", "condition_min", "condition_max", "probability"],
-	Kind.TRANSITION_REGION: ["position", "end", "destination", "quantization",
-		"condition_parameter", "condition_min", "condition_max", "probability"],
+	Kind.TRANSITION: ["position", "destination", "quantization", "transition_mode", "transition_length",
+		"transition_event", "condition_parameter", "condition_min", "condition_max", "probability"],
+	Kind.TRANSITION_REGION: ["position", "end", "destination", "quantization", "transition_mode",
+		"transition_length", "transition_event", "condition_parameter", "condition_min", "condition_max",
+		"probability"],
 }
 const _ALL_FIELDS := ["name", "position", "end", "bpm", "beats_per_bar", "beat_unit", "destination",
-	"quantization", "condition_parameter", "condition_min", "condition_max", "probability"]
+	"quantization", "transition_mode", "transition_length", "transition_event", "condition_parameter",
+	"condition_min", "condition_max", "probability"]
 
 @export var kind := Kind.MARKER:
 	set(value):
@@ -53,6 +61,13 @@ const _ALL_FIELDS := ["name", "position", "end", "bpm", "beats_per_bar", "beat_u
 ## Name of a DESTINATION marker.
 @export var destination := ""
 @export var quantization := Quantization.NONE
+## How the jump sounds: a cut, a crossfade, or a bridge.
+@export var transition_mode := TransitionMode.CUT
+## CROSSFADE / BRIDGE: how long, in the event's timeline units (seconds, or beats at the tempo
+## where the transition happens).
+@export_range(0.0, 64.0, 0.01, "or_greater") var transition_length := 0.0
+## Played as the transition starts: a stinger over a cut or crossfade, the fill of a bridge.
+@export var transition_event: ChirpEvent
 
 @export_group("Condition")
 ## Local or global parameter that must be within [condition_min, condition_max]. Empty = always.

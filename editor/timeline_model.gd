@@ -864,8 +864,19 @@ static func marker_label(marker: ChirpMarker) -> String:
 		ChirpMarker.Kind.DESTINATION:
 			return "◆ " + marker.name
 		ChirpMarker.Kind.TRANSITION:
-			return "→ " + marker.destination
+			return "→ " + marker.destination + transition_suffix(marker)
 	return marker.name if marker.name else "marker"
+
+
+## "  (crossfade 2)" / "  (bridge 1, + stinger)": how a transition sounds, for its label.
+static func transition_suffix(marker: ChirpMarker) -> String:
+	var parts: PackedStringArray = []
+	if marker.transition_mode != ChirpMarker.TransitionMode.CUT and marker.transition_length > 0.0:
+		parts.append("%s %s" % [ChirpMarker.TransitionMode.keys()[marker.transition_mode].to_lower(),
+			_number(marker.transition_length)])
+	if marker.transition_event:
+		parts.append("+ stinger" if marker.transition_mode != ChirpMarker.TransitionMode.BRIDGE else "+ fill")
+	return "  (%s)" % ", ".join(parts) if not parts.is_empty() else ""
 
 
 ## The text property renaming a marker edits: "name", "destination" (transitions), or "" (none).

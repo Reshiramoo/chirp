@@ -276,6 +276,12 @@ Everything else on the timeline is a [ChirpMarker](docs/classes/ChirpMarker.md) 
 | `DESTINATION` | A named point to jump to |
 | `TRANSITION` / `TRANSITION_REGION` | Jump to a destination when reached / while inside, if the condition holds, optionally on the next `BEAT` or `BAR` |
 
+**Transitions** cut by default. Set a transition's `transition_mode` to `CROSSFADE` (fade the old
+section out and the new one in) or `BRIDGE` (hold, fading the old section out, then jump), with a
+`transition_length` in the event's units: `4` beats is a bar of 4/4. `transition_event` plays an
+event as the transition starts: a stinger over the cut or crossfade, or the drum fill of a bridge.
+The timeline shows them on the marker, e.g. `→ chorus  (bridge 4, + fill)`.
+
 Conditions are a parameter range (local or global) and a probability. Instruments can have
 conditions too, and a cut behaviour (`STOP` or `PLAY_TO_END`) for when it stops holding or a
 jump leaves them. An instrument with `quantization` (beat or bar) that becomes due part way through

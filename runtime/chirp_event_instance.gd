@@ -77,7 +77,9 @@ var _timeline: Timeline
 var _playhead := 0.0
 var _sustain: Timeline.Mark # the sustain point holding the playhead, if any
 var _released_sustains := {} # Mark -> true: let past for the rest of this pass
-var _jump := {} # pending (quantized) transition: {time, target: Mark}
+var _jump := {} # pending (quantized) transition: {time, target: Mark, marker: ChirpMarker}
+var _bridge := {} # BRIDGE transition holding the playhead: {left: seconds, target: Mark}
+var _crossfade_in := 0.0 # CROSSFADE: seconds left in which newly started voices fade in
 var _jumped := false # the playhead jumped this frame
 var _entry_voices := {} # timeline / parameter sheet instrument index -> Voice
 var _entry_done := {} # instrument index -> true once triggered (until it leaves its range)
@@ -104,6 +106,9 @@ class Voice:
 	var detached := false # left to play to its end, no longer controlled
 	var fade := 1.0 # PARAMETER sheets: crossfade gain, kept at its last value once detached
 	var start_shift := 0.0 # seconds the sound runs ahead of its timeline position (start offsets)
+	var ramp := 1.0 # transitions: gain fading in or out...
+	var ramp_to := 1.0 # ...toward this (0 = stop when it gets there)...
+	var ramp_speed := 0.0 # ...this much per second
 	var own_stream: AudioStream # this voice's private copy of its sound, for native looping (or null)
 	var virtual_pos := 0.0 # while the instance is virtual: where the paused player stopped...
 	var virtual_since := 0.0 # ...and the instance's _time then
@@ -424,6 +429,11 @@ func _process(delta: float) -> void:
 			if voice.silence_left <= 0.0:
 				_on_voice_finished(voice)
 			continue
+		if voice.ramp != voice.ramp_to:
+			voice.ramp = move_toward(voice.ramp, voice.ramp_to, voice.ramp_speed * delta)
+			if voice.ramp <= 0.0 and voice.ramp_to <= 0.0:
+				_stop_voice(voice) # faded out by a transition
+				continue
 		if voice.instrument.kind == ChirpInstrument.Kind.SCATTERER:
 			_step_scatterer(voice, delta)
 		if _voices.has(voice) and voice.entry == -1 and not voice.detached \
@@ -483,6 +493,8 @@ func _schedule_next_consecutive() -> void:
 # --- timeline ------------------------------------------------------------------------
 
 func _reset_timeline_pass() -> void:
+	_bridge = {}
+	_crossfade_in = 0.0
 	_sustain = null
 	_released_sustains.clear()
 	_jump = {}
@@ -495,7 +507,7 @@ func _reset_timeline_pass() -> void:
 func _timeline_finished() -> bool:
 	if _timeline == null:
 		return true
-	return _playhead >= _timeline.length and _sustain == null and _jump.is_empty()
+	return _playhead >= _timeline.length and _sustain == null and _jump.is_empty() and _bridge.is_empty()
 
 
 ## Moves the playhead forward by [param delta], handling sustain points, loop regions
@@ -508,6 +520,8 @@ func _advance_timeline(delta: float) -> void:
 		_released_sustains[_sustain] = true
 		_sustain = null
 	var remaining := delta
+	_crossfade_in = maxf(_crossfade_in - delta, 0.0)
+	remaining = _hold_bridge(remaining)
 	for _i in 32: # guards against transitions that jump into themselves
 		if remaining <= 0.0:
 			return
@@ -545,7 +559,62 @@ func _advance_timeline(delta: float) -> void:
 				if randf() * 100.0 < target.marker.probability:
 					_jump_to(target.time)
 			"jump":
-				_jump_to(_jump.target.time)
+				if _transition(_jump.marker, _jump.target):
+					remaining = _hold_bridge(remaining) # a bridge holds the playhead
+
+
+## Starts a transition's jump: its stinger, then a cut, a crossfade or a bridge. True when a
+## bridge now holds the playhead.
+func _transition(marker: ChirpMarker, target: Timeline.Mark) -> bool:
+	if marker.transition_event:
+		var stinger := ChirpInstrument.new()
+		stinger.kind = ChirpInstrument.Kind.EVENT
+		stinger.event = marker.transition_event
+		_trigger(stinger) # not a timeline entry: plays on, whatever the playhead does
+	var length := _transition_seconds(marker)
+	if marker.transition_mode == ChirpMarker.TransitionMode.CUT or length <= 0.0:
+		_jump_to(target.time)
+		return false
+	for voice: Voice in _entry_voices.values():
+		if voice.instrument.kind == ChirpInstrument.Kind.SILENCE:
+			_stop_voice(voice)
+			continue
+		_detach(voice)
+		_ramp(voice, 0.0, length)
+	if marker.transition_mode == ChirpMarker.TransitionMode.BRIDGE:
+		_jump = {}
+		_bridge = {left = length, target = target}
+		return true
+	_jump_to(target.time)
+	_crossfade_in = length
+	return false
+
+
+## Spends [param remaining] seconds on a BRIDGE holding the playhead, jumping to its destination
+## once it's over. Returns the time left to advance (0 while still holding).
+func _hold_bridge(remaining: float) -> float:
+	if _bridge.is_empty():
+		return remaining
+	if remaining < _bridge.left:
+		_bridge.left -= remaining
+		return 0.0
+	remaining -= _bridge.left
+	_jump_to(_bridge.target.time)
+	return remaining
+
+
+## A marker's transition_length in seconds, at the tempo where the transition happens.
+func _transition_seconds(marker: ChirpMarker) -> float:
+	if marker.transition_length <= 0.0:
+		return 0.0
+	var units := _timeline.to_units(_playhead)
+	return _timeline.to_seconds(units + marker.transition_length) - _playhead
+
+
+## Fades a voice's gain to [param to] over [param seconds] (from where it is now).
+static func _ramp(voice: Voice, to: float, seconds: float) -> void:
+	voice.ramp_to = to
+	voice.ramp_speed = absf(to - voice.ramp) / seconds if seconds > 0.0 else INF
 
 
 ## True when [param time] comes before the current stop point (or ties with the end of the frame).
@@ -573,11 +642,13 @@ func _schedule_transition(from: float, to: float) -> void:
 			_chirp._warn_once("dest:%s:%s" % [_event.resource_path, mark.marker.destination],
 				"Chirp: no DESTINATION marker named '%s'." % mark.marker.destination)
 			continue
-		_jump = {time = _timeline.next_boundary(reached, mark.marker.quantization), target = destination}
+		_jump = {time = _timeline.next_boundary(reached, mark.marker.quantization), target = destination,
+			marker = mark.marker}
 		return
 
 
 func _jump_to(time: float) -> void:
+	_bridge = {}
 	_playhead = time
 	_jumped = true
 	_jump = {}
@@ -622,6 +693,8 @@ func _wake_beat_waiters(bar: int, beat: int) -> void:
 
 ## Starts, stops and re-seeks instruments so they match the playhead.
 func _sync_entries() -> void:
+	if not _bridge.is_empty():
+		return # a bridge is playing: the old content is fading out, nothing new starts
 	if _jumped:
 		_quantized.clear() # boundaries worked out before the jump are stale
 	for entry in _timeline.entries:
@@ -663,6 +736,9 @@ func _sync_entries() -> void:
 			if started_voice:
 				started_voice.entry = entry.index
 				_entry_voices[entry.index] = started_voice
+				if _crossfade_in > 0.0:
+					started_voice.ramp = 0.0
+					_ramp(started_voice, 1.0, _crossfade_in)
 
 
 func _resync(voice: Voice, expected: float) -> void:
@@ -1188,7 +1264,7 @@ func _clear_voices() -> void:
 func _apply(voice: Voice, volume_factor: float, pitch_factor: float) -> void:
 	# The instrument's volume is read live, so the editor's volume knob is heard while playing.
 	var gain: float = _get_level() * voice.gain * db_to_linear(voice.instrument.volume_db) * volume_factor \
-		* _chirp._audition_gain(_event, voice.instrument)
+		* _chirp._audition_gain(_event, voice.instrument) * voice.ramp
 	if not voice.instrument.automations.is_empty():
 		gain *= _automations_factor(voice.instrument.automations, ChirpAutomation.Target.VOLUME)
 		pitch_factor *= _automations_factor(voice.instrument.automations, ChirpAutomation.Target.PITCH)

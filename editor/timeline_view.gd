@@ -159,7 +159,8 @@ func _draw() -> void:
 			draw_rect(rect, Color.WHITE, false, 2.0)
 		if issues.has(marker):
 			_draw_issue(Vector2(rect.end.x - 9, rect.position.y + 10), issues[marker])
-		var label := "loop" if marker.kind == ChirpMarker.Kind.LOOP_REGION else "→ " + marker.destination
+		var label := "loop" if marker.kind == ChirpMarker.Kind.LOOP_REGION \
+			else "→ " + marker.destination + TimelineModel.transition_suffix(marker)
 		if not marker.condition_parameter.is_empty():
 			label += "  if %s" % marker.condition_parameter
 		_draw_clipped_text(font, small, label, rect.grow_individual(-4, 0, 0, 0), color.lightened(0.4))

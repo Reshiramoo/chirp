@@ -60,6 +60,9 @@ go.condition_min = 0.5
 | float | [position](#property-position) | `0.0` |
 | float | [probability](#property-probability) | `100.0` |
 | [Quantization](#enum-quantization) | [quantization](#property-quantization) | `NONE` |
+| [ChirpEvent](ChirpEvent.md) | [transition_event](#property-transition_event) | `null` |
+| float | [transition_length](#property-transition_length) | `0.0` |
+| [TransitionMode](#enum-transitionmode) | [transition_mode](#property-transition_mode) | `CUT` |
 
 ## Methods
 
@@ -96,6 +99,21 @@ go.condition_min = 0.5
 
 When several things happen in the same frame, the earliest on the timeline wins. A quantized transition, once armed, jumps at its
 beat or bar line even if the playhead has left the region by then.
+
+---
+
+<a id="enum-transitionmode"></a>
+### enum TransitionMode
+
+How a transition's jump sounds.
+
+- **CUT** = `0`: jump at once; the old content stops and the destination's starts.
+- **CROSSFADE** = `1`: jump at once, fading the old content out and the destination's in over
+  `transition_length`.
+- **BRIDGE** = `2`: hold the playhead for `transition_length` while the old content fades out (and
+  `transition_event` plays a fill), then jump. Nothing new starts and no beats fire while it holds.
+
+With a `transition_length` of `0`, every mode cuts.
 
 ---
 
@@ -209,6 +227,30 @@ reached.
 ### [Quantization](#enum-quantization) quantization = `NONE`
 
 TRANSITION / TRANSITION_REGION: see [Quantization](#enum-quantization).
+
+---
+
+<a id="property-transition_event"></a>
+### [ChirpEvent](ChirpEvent.md) transition_event = `null`
+
+TRANSITION / TRANSITION_REGION: played as the transition starts, as a nested event that plays to
+its end on its own: a stinger over a cut or crossfade, or the fill of a bridge (make it
+`transition_length` long).
+
+---
+
+<a id="property-transition_length"></a>
+### float transition_length = `0.0`
+
+TRANSITION / TRANSITION_REGION: how long a `CROSSFADE` or `BRIDGE` lasts, in the event's timeline
+units: seconds, or beats at the tempo where the transition happens (so `4` is a bar of 4/4).
+
+---
+
+<a id="property-transition_mode"></a>
+### [TransitionMode](#enum-transitionmode) transition_mode = `CUT`
+
+TRANSITION / TRANSITION_REGION: how the jump sounds. See [TransitionMode](#enum-transitionmode).
 
 ## Method Descriptions
 
