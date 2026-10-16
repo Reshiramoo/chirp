@@ -516,7 +516,7 @@ static func _marker_icon(kind: int) -> Texture2D:
 	var unit := maxi(roundi(EditorInterface.get_editor_scale()), 1)
 	var image := Image.create_empty(16 * unit, 16 * unit, false, Image.FORMAT_RGBA8)
 	var color: Color = TimelineView.MARKER_COLORS[kind]
-	if kind in [ChirpMarker.Kind.LOOP_REGION, ChirpMarker.Kind.TRANSITION_REGION]:
+	if kind in [ChirpMarker.Kind.LOOP_REGION, ChirpMarker.Kind.TRANSITION_REGION, ChirpMarker.Kind.MAGNET_REGION]:
 		image.fill_rect(Rect2i(Vector2i(1, 5) * unit, Vector2i(14, 6) * unit), Color(color, 0.45))
 		image.fill_rect(Rect2i(Vector2i(1, 5) * unit, Vector2i(14, 2) * unit), color)
 	else:

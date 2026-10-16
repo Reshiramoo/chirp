@@ -51,6 +51,7 @@ const MARKER_COLORS := {
 	ChirpMarker.Kind.DESTINATION: Color(0.78, 0.55, 1.0),
 	ChirpMarker.Kind.TRANSITION: Color(1.0, 0.55, 0.25),
 	ChirpMarker.Kind.TRANSITION_REGION: Color(1.0, 0.55, 0.25),
+	ChirpMarker.Kind.MAGNET_REGION: Color(0.95, 0.4, 0.75),
 }
 const PLAYHEAD_COLOR := Color(1.0, 0.3, 0.3)
 const DROP_COLOR := Color(0.45, 0.85, 1.0)
@@ -160,7 +161,8 @@ func _draw() -> void:
 		if issues.has(marker):
 			_draw_issue(Vector2(rect.end.x - 9, rect.position.y + 10), issues[marker])
 		var label := "loop" if marker.kind == ChirpMarker.Kind.LOOP_REGION \
-			else "→ " + marker.destination + TimelineModel.transition_suffix(marker)
+			else ("magnet" if marker.kind == ChirpMarker.Kind.MAGNET_REGION else "→ " + marker.destination) \
+			+ TimelineModel.transition_suffix(marker)
 		if not marker.condition_parameter.is_empty():
 			label += "  if %s" % marker.condition_parameter
 		_draw_clipped_text(font, small, label, rect.grow_individual(-4, 0, 0, 0), color.lightened(0.4))

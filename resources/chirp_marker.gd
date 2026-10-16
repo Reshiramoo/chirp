@@ -13,6 +13,7 @@ enum Kind {
 	DESTINATION, ## A named point that transitions jump to.
 	TRANSITION, ## When the playhead reaches it and the condition holds, jump to destination.
 	TRANSITION_REGION, ## While the playhead is inside and the condition holds, jump to destination.
+	MAGNET_REGION, ## While the condition holds, a playhead outside the region jumps to its start.
 }
 
 enum TransitionMode {
@@ -38,6 +39,8 @@ const _FIELDS := {
 	Kind.TRANSITION_REGION: ["position", "end", "destination", "quantization", "transition_mode",
 		"transition_length", "transition_event", "condition_parameter", "condition_min", "condition_max",
 		"probability"],
+	Kind.MAGNET_REGION: ["position", "end", "quantization", "transition_mode", "transition_length",
+		"transition_event", "condition_parameter", "condition_min", "condition_max", "probability"],
 }
 const _ALL_FIELDS := ["name", "position", "end", "bpm", "beats_per_bar", "beat_unit", "destination",
 	"quantization", "transition_mode", "transition_length", "transition_event", "condition_parameter",
@@ -79,7 +82,7 @@ const _ALL_FIELDS := ["name", "position", "end", "bpm", "beats_per_bar", "beat_u
 
 
 func is_region() -> bool:
-	return kind == Kind.LOOP_REGION or kind == Kind.TRANSITION_REGION
+	return kind == Kind.LOOP_REGION or kind == Kind.TRANSITION_REGION or kind == Kind.MAGNET_REGION
 
 
 func _validate_property(property: Dictionary) -> void:

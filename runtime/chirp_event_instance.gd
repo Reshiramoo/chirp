@@ -635,8 +635,15 @@ func _schedule_transition(from: float, to: float) -> void:
 			ChirpMarker.Kind.TRANSITION_REGION:
 				if mark.time <= to and mark.end > from:
 					reached = maxf(from, mark.time)
+			ChirpMarker.Kind.MAGNET_REGION:
+				if mark.end > mark.time and (to < mark.time or from >= mark.end):
+					reached = from # outside it: pulled in
 		if reached < 0.0 or not _marker_condition(mark.marker) or randf() * 100.0 >= mark.marker.probability:
 			continue
+		if mark.marker.kind == ChirpMarker.Kind.MAGNET_REGION:
+			_jump = {time = _timeline.next_boundary(reached, mark.marker.quantization), target = mark,
+				marker = mark.marker}
+			return
 		var destination: Timeline.Mark = _timeline.destinations.get(mark.marker.destination)
 		if destination == null:
 			_chirp._warn_once("dest:%s:%s" % [_event.resource_path, mark.marker.destination],

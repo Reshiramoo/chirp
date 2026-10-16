@@ -125,12 +125,14 @@ static func _check_markers(event: ChirpEvent, globals: Array, add: Callable) -> 
 			elif not destinations.has(marker.destination):
 				add.call(Severity.WARNING, "Transition %s goes to '%s', but there's no destination by that name."
 					% [label, marker.destination], marker)
-		if marker.kind in [ChirpMarker.Kind.TRANSITION, ChirpMarker.Kind.TRANSITION_REGION]:
+		if marker.kind in [ChirpMarker.Kind.TRANSITION, ChirpMarker.Kind.TRANSITION_REGION, ChirpMarker.Kind.MAGNET_REGION]:
 			if marker.transition_mode != ChirpMarker.TransitionMode.CUT and marker.transition_length <= 0.0:
 				add.call(Severity.NOTE, "Transition %s is a %s with no length: it cuts." % [label,
 					ChirpMarker.TransitionMode.keys()[marker.transition_mode].to_lower()], marker)
 			if marker.transition_event == event:
 				add.call(Severity.WARNING, "Transition %s plays this event as its stinger." % label, marker)
+		if marker.kind == ChirpMarker.Kind.MAGNET_REGION and marker.condition_parameter.is_empty() and mark.end > mark.time:
+			add.call(Severity.NOTE, "Magnet %s has no condition: it always holds the playhead inside it." % label, marker)
 		if marker.is_region() and mark.end <= mark.time:
 			add.call(Severity.WARNING, "Region %s ends where it starts: it never %s." % [label,
 				"loops" if marker.kind == ChirpMarker.Kind.LOOP_REGION else "acts"], marker)

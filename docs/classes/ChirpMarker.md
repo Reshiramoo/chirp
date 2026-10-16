@@ -96,6 +96,12 @@ go.condition_min = 0.5
 - **TRANSITION_REGION** = `6`: like TRANSITION, but checked every frame while the playhead is
   inside the region. Uses `position`, `end`, `destination`, `quantization`, the condition and
   `probability` (rolled every frame the condition holds, until a jump is armed).
+- **MAGNET_REGION** = `7`: while the condition holds, a playhead outside the region (before or
+  after it) is pulled to its start, on the next beat or bar with `quantization`, sounding like
+  `transition_mode`. Once inside, leaving it pulls it back, so it loops while the condition holds;
+  when the condition stops holding, playback carries on past it. E.g. a combat section that the
+  music moves to as soon as combat starts, wherever it is. Uses `position`, `end`, `quantization`,
+  the transition settings, the condition and `probability`.
 
 When several things happen in the same frame, the earliest on the timeline wins. A quantized transition, once armed, jumps at its
 beat or bar line even if the playhead has left the region by then.
@@ -226,14 +232,14 @@ reached.
 <a id="property-quantization"></a>
 ### [Quantization](#enum-quantization) quantization = `NONE`
 
-TRANSITION / TRANSITION_REGION: see [Quantization](#enum-quantization).
+TRANSITION / TRANSITION_REGION / MAGNET_REGION: see [Quantization](#enum-quantization).
 
 ---
 
 <a id="property-transition_event"></a>
 ### [ChirpEvent](ChirpEvent.md) transition_event = `null`
 
-TRANSITION / TRANSITION_REGION: played as the transition starts, as a nested event that plays to
+TRANSITION / TRANSITION_REGION / MAGNET_REGION: played as the transition starts, as a nested event that plays to
 its end on its own: a stinger over a cut or crossfade, or the fill of a bridge (make it
 `transition_length` long).
 
@@ -242,7 +248,7 @@ its end on its own: a stinger over a cut or crossfade, or the fill of a bridge (
 <a id="property-transition_length"></a>
 ### float transition_length = `0.0`
 
-TRANSITION / TRANSITION_REGION: how long a `CROSSFADE` or `BRIDGE` lasts, in the event's timeline
+TRANSITION / TRANSITION_REGION / MAGNET_REGION: how long a `CROSSFADE` or `BRIDGE` lasts, in the event's timeline
 units: seconds, or beats at the tempo where the transition happens (so `4` is a bar of 4/4).
 
 ---
@@ -250,11 +256,11 @@ units: seconds, or beats at the tempo where the transition happens (so `4` is a 
 <a id="property-transition_mode"></a>
 ### [TransitionMode](#enum-transitionmode) transition_mode = `CUT`
 
-TRANSITION / TRANSITION_REGION: how the jump sounds. See [TransitionMode](#enum-transitionmode).
+TRANSITION / TRANSITION_REGION / MAGNET_REGION: how the jump sounds. See [TransitionMode](#enum-transitionmode).
 
 ## Method Descriptions
 
 <a id="method-is_region"></a>
 ### bool is_region()
 
-`true` for LOOP_REGION and TRANSITION_REGION.
+`true` for LOOP_REGION, TRANSITION_REGION and MAGNET_REGION.

@@ -275,6 +275,7 @@ Everything else on the timeline is a [ChirpMarker](docs/classes/ChirpMarker.md) 
 | `SUSTAIN_POINT` | Holds the playhead until `key_off()` or its condition stops holding |
 | `DESTINATION` | A named point to jump to |
 | `TRANSITION` / `TRANSITION_REGION` | Jump to a destination when reached / while inside, if the condition holds, optionally on the next `BEAT` or `BAR` |
+| `MAGNET_REGION` | While its condition holds, pulls the playhead in from wherever it is (optionally on the next beat or bar), and keeps it there |
 
 **Transitions** cut by default. Set a transition's `transition_mode` to `CROSSFADE` (fade the old
 section out and the new one in) or `BRIDGE` (hold, fading the old section out, then jump), with a
