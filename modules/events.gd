@@ -190,7 +190,19 @@ func create_instance(event_or_path: Variant) -> ChirpEventInstance:
 	var event := get_event(event_or_path)
 	if event == null:
 		return null
-	return ChirpEventInstance.new(_chirp, event, _chirp.mixer.resolve_bus(_bus_path(event)))
+	var instance := ChirpEventInstance.new(_chirp, event, _chirp.mixer.resolve_bus(_bus_path(event)))
+	instance._label = event_or_path if event_or_path is String else _label_of(event)
+	return instance
+
+
+## A readable name for [param event]: its event path when registered, else its file.
+func _label_of(event: ChirpEvent) -> String:
+	for path: String in _entries:
+		if _entries[path].get("event") == event:
+			return path
+	if not event.resource_path.is_empty():
+		return event.resource_path.get_file()
+	return event.resource_name if event.resource_name else "(event)"
 
 
 ## Fire-and-forget. [param position] may be null (non-spatial), a Vector2 or a Vector3.

@@ -45,6 +45,7 @@ idle; the plugin auditions sounds through a separate copy with [preview](#proper
 | void | [apply_config](#method-apply_config)(new_config: [ChirpConfig](ChirpConfig.md)) |
 | [ChirpEventInstance](ChirpEventInstance.md) | [create_instance](#method-create_instance)(event_or_path: Variant) |
 | float | [get_output_latency](#method-get_output_latency)() |
+| Dictionary | [get_stats](#method-get_stats)() |
 | bool | [is_instrument_muted](#method-is_instrument_muted)(instrument: [ChirpInstrument](ChirpInstrument.md)) |
 | bool | [is_instrument_soloed](#method-is_instrument_soloed)(instrument: [ChirpInstrument](ChirpInstrument.md)) |
 | [ChirpEventInstance](ChirpEventInstance.md) | [play_one_shot](#method-play_one_shot)(event_or_path: Variant, position: Variant = null) |
@@ -133,6 +134,31 @@ Shortcut for [Chirp.events.create_instance()](ChirpEvents.md#method-create_insta
 
 Seconds between Chirp mixing a sound and it being heard: `AudioServer.get_output_latency()` plus
 [latency_offset](#property-latency_offset).
+
+---
+
+<a id="method-get_stats"></a>
+### Dictionary get_stats()
+
+What Chirp is doing right now: the data behind the editor's profiler (Debugger → Chirp), for your
+own debug overlay too.
+
+```
+{
+  voices = {real, virtual, limit},            # see Chirp.events.get_voice_usage()
+  effect_buses = [used, total],
+  instances = [{event, state, virtual, paused, voices, bus, position, level_db}],
+  buses = [{name, volume_db, peak_db, duck_db, muted}],
+  snapshots = [{name, level}],
+  parameters = {name: value},                  # global parameters
+}
+```
+
+`event` is the event path the instance was created from (or its registered path, or its file),
+`state` is `"playing"`, `"sustaining"`, `"stopping"` or `"stopped"`, `voices` the sounds it's
+playing, `position` its timeline position in seconds (`-1` without a timeline), and `level_db` its
+loudness at the listener. While the game runs from the editor, Chirp sends this to the profiler
+four times a second; exported games skip it.
 
 ---
 

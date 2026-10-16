@@ -8,6 +8,7 @@ const EventDock := preload("editor/event_dock.gd")
 const InspectorPlugin := preload("editor/inspector_plugin.gd")
 const AttenuationGizmo3D := preload("editor/attenuation_gizmo_3d.gd")
 const AttenuationOverlay2D := preload("editor/attenuation_overlay_2d.gd")
+const Profiler := preload("editor/profiler.gd")
 
 var _preview_chirp: Node # a private Chirp used to audition sounds in the editor
 var _browser: EventBrowser
@@ -15,6 +16,7 @@ var _event_dock: EventDock
 var _inspector_plugin: InspectorPlugin
 var _gizmo_3d: AttenuationGizmo3D
 var _overlay_2d: AttenuationOverlay2D
+var _profiler: Profiler
 var _reload_queued := false
 
 
@@ -62,6 +64,8 @@ func _enter_tree() -> void:
 	_overlay_2d = AttenuationOverlay2D.new()
 	_overlay_2d.plugin = self
 	_overlay_2d.chirp = _preview_chirp
+	_profiler = Profiler.new()
+	add_debugger_plugin(_profiler)
 	EditorInterface.get_inspector().property_edited.connect(_on_property_edited)
 
 	ProjectSettings.settings_changed.connect(_queue_reload)
@@ -73,6 +77,7 @@ func _exit_tree() -> void:
 	ProjectSettings.settings_changed.disconnect(_queue_reload)
 	EditorInterface.get_resource_filesystem().filesystem_changed.disconnect(_queue_reload)
 	EditorInterface.get_inspector().property_edited.disconnect(_on_property_edited)
+	remove_debugger_plugin(_profiler)
 	remove_node_3d_gizmo_plugin(_gizmo_3d)
 	remove_inspector_plugin(_inspector_plugin)
 	remove_dock(_event_dock)

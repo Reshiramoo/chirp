@@ -35,7 +35,11 @@ var preview := false
 ## calibrate it (Bluetooth headphones add 100-300 ms); negative values are allowed.
 var latency_offset := 0.0
 
+const DEBUGGER_MESSAGE := "chirp:stats"
+const DEBUGGER_INTERVAL := 0.25 # seconds between stats sent to the editor's Chirp profiler
+
 var _voice_root: Node
+var _debugger_in := 0.0
 var _warned := {}
 var _muted := {} # ChirpInstrument -> true (auditioning)
 var _soloed := {} # ChirpInstrument -> true (auditioning)
@@ -84,6 +88,60 @@ func _process(delta: float) -> void:
 	parameters._process(delta)
 	events._process(delta)
 	mixer._process(delta)
+	if not preview and EngineDebugger.is_active():
+		_debugger_in -= delta
+		if _debugger_in <= 0.0:
+			_debugger_in = DEBUGGER_INTERVAL
+			EngineDebugger.send_message(DEBUGGER_MESSAGE, [get_stats()])
+
+
+## What Chirp is doing right now, for the editor's profiler (Debugger → Chirp) or an in-game
+## overlay: [code]{voices: {real, virtual, limit}, effect_buses: [used, total], instances: [{event,
+## state, virtual, paused, voices, bus, position, level_db}], buses: [{name, volume_db, peak_db,
+## duck_db}], snapshots: [{name, level}], parameters: {name: value}}[/code]. position is the
+## timeline position in seconds, or -1 without a timeline.
+func get_stats() -> Dictionary:
+	var instances: Array[Dictionary] = []
+	for instance in events.get_active_instances():
+		var level := instance.get_audibility()
+		instances.append({
+			event = instance._label,
+			state = "sustaining" if instance.is_sustaining() else ChirpEventInstance.State.keys()[instance.get_state()].to_lower(),
+			virtual = instance.is_virtual(),
+			paused = instance._applied_paused,
+			voices = instance._player_count(),
+			bus = String(instance._bus),
+			position = instance.get_timeline_position() if instance._timeline else -1.0,
+			level_db = linear_to_db(level) if level > 0.00001 else -100.0,
+		})
+	var buses: Array[Dictionary] = []
+	for i in AudioServer.bus_count:
+		var bus_name := AudioServer.get_bus_name(i)
+		if bus_name.begins_with(Mixer.EFFECT_BUS_PREFIX):
+			continue
+		buses.append({
+			name = bus_name,
+			volume_db = AudioServer.get_bus_volume_db(i),
+			peak_db = maxf(AudioServer.get_bus_peak_volume_left_db(i, 0), AudioServer.get_bus_peak_volume_right_db(i, 0)),
+			duck_db = mixer.get_bus_duck_db(bus_name),
+			muted = AudioServer.is_bus_mute(i),
+		})
+	var snapshots: Array[Dictionary] = []
+	for snapshot in mixer.get_active_snapshots():
+		snapshots.append({name = snapshot.get_snapshot().name, level = snapshot.get_level()})
+	var values := {}
+	for definition in config.global_parameters if config else []:
+		if definition:
+			values[definition.name] = parameters.get_value(definition.name)
+	var fx := mixer.get_effect_bus_usage()
+	return {
+		voices = events.get_voice_usage(),
+		effect_buses = [fx.x, fx.y],
+		instances = instances,
+		buses = buses,
+		snapshots = snapshots,
+		parameters = values,
+	}
 
 
 func _exit_tree() -> void:

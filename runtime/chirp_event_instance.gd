@@ -82,6 +82,7 @@ var _jumped := false # the playhead jumped this frame
 var _entry_voices := {} # timeline / parameter sheet instrument index -> Voice
 var _entry_done := {} # instrument index -> true once triggered (until it leaves its range)
 var _quantized := {} # timeline entry index -> playhead time a quantized instrument waits for
+var _label := "" # how the profiler names it: the event path it was created from
 var _virtual := false # players paused to save the mixer's work; the instance keeps running
 var _parent_id := 0 # nested events: the instance playing this one
 var _processed_usec := 0 # when the playhead last moved, for the audible position between frames
