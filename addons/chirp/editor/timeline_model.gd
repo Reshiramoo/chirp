@@ -17,6 +17,7 @@ const BASE_ROW_HEIGHT := 30.0
 const BASE_EDGE_GRAB := 6.0
 const BASE_AUTOMATION_HEIGHT := 52.0
 const BASE_POINT_RADIUS := 4.0
+const BASE_EDGE_SNAP := 8.0 # pixels within which an item edge pulls a drag onto it
 const MIN_ZOOM := 2.0
 const MAX_ZOOM := 2000.0
 const EPSILON := 0.000001
@@ -42,6 +43,7 @@ var row_height := BASE_ROW_HEIGHT
 var edge_grab := BASE_EDGE_GRAB
 var automation_height := BASE_AUTOMATION_HEIGHT
 var point_radius := BASE_POINT_RADIUS
+var edge_snap := BASE_EDGE_SNAP
 
 ## Width in pixels of a marker label; the view sets this from its font.
 var measure_text := func(text: String) -> float: return text.length() * 7.0
@@ -61,6 +63,7 @@ func set_display_scale(display_scale: float) -> void:
 	edge_grab = BASE_EDGE_GRAB * display_scale
 	automation_height = BASE_AUTOMATION_HEIGHT * display_scale
 	point_radius = BASE_POINT_RADIUS * display_scale
+	edge_snap = BASE_EDGE_SNAP * display_scale
 
 
 ## Recompiles the event's timeline and region stacking (cheap; call whenever the event may have changed).
@@ -557,8 +560,15 @@ func bar_length_at(unit: float) -> float:
 	return length
 
 
-## Nearest beat or bar line to [param unit] (or [param unit] itself when snapping is off).
-func snap_unit(unit: float, mode := snap) -> float:
+## Nearest beat or bar line to [param unit] (or [param unit] itself when snapping is off). On
+## timelines, an item edge within edge_snap pixels wins over the grid: where an instrument's block
+## starts or ends, where its sound ends, a marker or region edge. [param exclude] is the item
+## being dragged, whose own edges don't count.
+func snap_unit(unit: float, mode := snap, exclude: Resource = null) -> float:
+	if mode != Snap.OFF and not is_sheet():
+		var edge := edge_near(unit, exclude)
+		if edge != INF:
+			return edge
 	if is_sheet():
 		var sheet := sheet_range()
 		if mode != Snap.OFF:
@@ -588,6 +598,103 @@ func snap_unit(unit: float, mode := snap) -> float:
 				best_distance = absf(candidate - unit)
 				best = candidate
 	return maxf(best, 0.0)
+
+
+## The item edge nearest [param unit] within edge_snap pixels, or INF.
+func edge_near(unit: float, exclude: Resource = null) -> float:
+	var best := INF
+	var reach := edge_snap / zoom
+	for edge in item_edges(exclude):
+		if absf(edge - unit) <= reach and absf(edge - unit) < absf(best - unit):
+			best = edge
+	return best
+
+
+## Edges items snap to, in units: instrument blocks' starts and ends, where their sounds end, and
+## markers' positions and region ends.
+func item_edges(exclude: Resource = null) -> PackedFloat64Array:
+	var edges := PackedFloat64Array()
+	if event == null:
+		return edges
+	for instrument in event.instruments:
+		if instrument == null or instrument == exclude:
+			continue
+		var span := instrument_span(instrument)
+		edges.append(span.x)
+		if span.y != INF:
+			edges.append(span.y)
+		var sound_end := sound_end_unit(instrument)
+		if sound_end != INF:
+			edges.append(sound_end)
+	for marker in event.markers:
+		if marker and marker != exclude and marker.kind != ChirpMarker.Kind.TEMPO:
+			edges.append(marker.position)
+			if marker.is_region():
+				edges.append(marker.end)
+	return edges
+
+
+# --- tempo ----------------------------------------------------------------------------
+
+## The TEMPO marker in effect at [param unit], or null before the first one (120 BPM 4/4).
+func tempo_marker_at(unit: float) -> ChirpMarker:
+	var found: ChirpMarker = null
+	if event:
+		for marker in event.markers:
+			if marker and marker.kind == ChirpMarker.Kind.TEMPO and marker.position <= unit + EPSILON \
+					and (found == null or marker.position >= found.position):
+				found = marker
+	return found
+
+
+## The event's first TEMPO marker (the one the toolbar's tempo controls edit), or null.
+func first_tempo_marker() -> ChirpMarker:
+	var first: ChirpMarker = null
+	if event:
+		for marker in event.markers:
+			if marker and marker.kind == ChirpMarker.Kind.TEMPO and (first == null or marker.position < first.position):
+				first = marker
+	return first
+
+
+## Seconds of an instrument's (longest) sound from its start offset; 0 when unknown.
+static func sound_seconds(instrument: ChirpInstrument) -> float:
+	if instrument == null or instrument.kind != ChirpInstrument.Kind.SOUND:
+		return 0.0
+	return maxf(instrument.get_length() - instrument.start_offset, 0.0)
+
+
+## The BPM that makes [param seconds] exactly [param bars] bars of [param beats_per_bar] beats.
+static func fit_bpm(seconds: float, bars: int, beats_per_bar: int) -> float:
+	return bars * beats_per_bar * 60.0 / seconds if seconds > 0.0 else Timeline.DEFAULT_BPM
+
+
+## How many whole bars [param instrument]'s sound lasts at the tempo in effect where it starts
+## (at least 1): the starting guess for fitting the tempo to it.
+func suggest_bars(instrument: ChirpInstrument) -> int:
+	var tempo := tempo_marker_at(instrument.start)
+	var bpm := tempo.bpm if tempo else Timeline.DEFAULT_BPM
+	var beats_per_bar := tempo.beats_per_bar if tempo else 4
+	return maxi(roundi(sound_seconds(instrument) * bpm / 60.0 / beats_per_bar), 1)
+
+
+## Average BPM of [param taps] (tap times in seconds, oldest first), from up to the last 8
+## intervals; 0 with fewer than 4 taps.
+static func tap_bpm(taps: PackedFloat64Array) -> float:
+	if taps.size() < 4:
+		return 0.0
+	var first := maxi(taps.size() - 9, 0)
+	var span := taps[taps.size() - 1] - taps[first]
+	return snappedf(60.0 * (taps.size() - 1 - first) / span, 0.1) if span > 0.0 else 0.0
+
+
+## Where an instrument's (longest) sound ends on the timeline, in units, from its start offset;
+## INF when unknown (no sound, nested events).
+func sound_end_unit(instrument: ChirpInstrument) -> float:
+	var seconds := instrument.get_length() - instrument.start_offset
+	if seconds <= 0.0 or timeline == null or instrument.kind != ChirpInstrument.Kind.SOUND:
+		return INF
+	return timeline.to_units(timeline.to_seconds(instrument.start) + seconds)
 
 
 # --- items ---------------------------------------------------------------------------
@@ -774,26 +881,37 @@ func drag_values(resource: Resource, part: String, origin: Dictionary, delta: fl
 		var end: float = start + origin.length if origin.length > 0.0 else span.y
 		match part:
 			"start":
-				var new_start := minf(snap_unit(start + delta, mode), end - _min_length(end))
+				var new_start := minf(snap_unit(start + delta, mode, resource), end - _min_length(end))
 				if end == INF:
 					return {start = new_start, length = origin.length}
 				return {start = new_start, length = end - new_start}
 			"end":
-				var new_end := maxf(snap_unit(end + delta, mode), start + _min_length(start))
+				var new_end := maxf(snap_unit(end + delta, mode, resource), start + _min_length(start))
 				return {start = start, length = new_end - start}
 			_:
-				return {start = snap_unit(start + delta, mode), length = origin.length}
+				return {start = _snap_move(start, end, delta, mode, resource), length = origin.length}
 	var marker := resource as ChirpMarker
 	var position: float = origin.position
 	var marker_end: float = origin.end
 	match part:
 		"start":
-			return {position = minf(snap_unit(position + delta, mode), marker_end - _min_length(marker_end)), end = marker_end}
+			return {position = minf(snap_unit(position + delta, mode, resource), marker_end - _min_length(marker_end)), end = marker_end}
 		"end":
-			return {position = position, end = maxf(snap_unit(marker_end + delta, mode), position + _min_length(position))}
+			return {position = position, end = maxf(snap_unit(marker_end + delta, mode, resource), position + _min_length(position))}
 		_:
-			var new_position := snap_unit(position + delta, mode)
+			var new_position := _snap_move(position, marker_end if marker.is_region() else INF, delta, mode, resource)
 			return {position = new_position, end = new_position + (marker_end - position) if marker.is_region() else marker_end}
+
+
+## Where an item moved by [param delta] starts: its start snapped, unless its end lands on an
+## item edge (then the end snaps there and the start follows).
+func _snap_move(start: float, end: float, delta: float, mode: Snap, resource: Resource) -> float:
+	if mode != Snap.OFF and end != INF and not is_sheet():
+		var start_edge := edge_near(start + delta, resource)
+		var end_edge := edge_near(end + delta, resource)
+		if end_edge != INF and (start_edge == INF or absf(end_edge - end - delta) < absf(start_edge - start - delta)):
+			return maxf(end_edge - (end - start), min_unit())
+	return snap_unit(start + delta, mode, resource)
 
 
 ## The smallest length an item can be resized to near [param unit]: one grid step when snapping.
