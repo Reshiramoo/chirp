@@ -634,6 +634,60 @@ func item_edges(exclude: Resource = null) -> PackedFloat64Array:
 	return edges
 
 
+# --- tempo ----------------------------------------------------------------------------
+
+## The TEMPO marker in effect at [param unit], or null before the first one (120 BPM 4/4).
+func tempo_marker_at(unit: float) -> ChirpMarker:
+	var found: ChirpMarker = null
+	if event:
+		for marker in event.markers:
+			if marker and marker.kind == ChirpMarker.Kind.TEMPO and marker.position <= unit + EPSILON \
+					and (found == null or marker.position >= found.position):
+				found = marker
+	return found
+
+
+## The event's first TEMPO marker (the one the toolbar's tempo controls edit), or null.
+func first_tempo_marker() -> ChirpMarker:
+	var first: ChirpMarker = null
+	if event:
+		for marker in event.markers:
+			if marker and marker.kind == ChirpMarker.Kind.TEMPO and (first == null or marker.position < first.position):
+				first = marker
+	return first
+
+
+## Seconds of an instrument's (longest) sound from its start offset; 0 when unknown.
+static func sound_seconds(instrument: ChirpInstrument) -> float:
+	if instrument == null or instrument.kind != ChirpInstrument.Kind.SOUND:
+		return 0.0
+	return maxf(instrument.get_length() - instrument.start_offset, 0.0)
+
+
+## The BPM that makes [param seconds] exactly [param bars] bars of [param beats_per_bar] beats.
+static func fit_bpm(seconds: float, bars: int, beats_per_bar: int) -> float:
+	return bars * beats_per_bar * 60.0 / seconds if seconds > 0.0 else Timeline.DEFAULT_BPM
+
+
+## How many whole bars [param instrument]'s sound lasts at the tempo in effect where it starts
+## (at least 1): the starting guess for fitting the tempo to it.
+func suggest_bars(instrument: ChirpInstrument) -> int:
+	var tempo := tempo_marker_at(instrument.start)
+	var bpm := tempo.bpm if tempo else Timeline.DEFAULT_BPM
+	var beats_per_bar := tempo.beats_per_bar if tempo else 4
+	return maxi(roundi(sound_seconds(instrument) * bpm / 60.0 / beats_per_bar), 1)
+
+
+## Average BPM of [param taps] (tap times in seconds, oldest first), from up to the last 8
+## intervals; 0 with fewer than 4 taps.
+static func tap_bpm(taps: PackedFloat64Array) -> float:
+	if taps.size() < 4:
+		return 0.0
+	var first := maxi(taps.size() - 9, 0)
+	var span := taps[taps.size() - 1] - taps[first]
+	return snappedf(60.0 * (taps.size() - 1 - first) / span, 0.1) if span > 0.0 else 0.0
+
+
 ## Where an instrument's (longest) sound ends on the timeline, in units, from its start offset;
 ## INF when unknown (no sound, nested events).
 func sound_end_unit(instrument: ChirpInstrument) -> float:

@@ -20,6 +20,8 @@ const ADD_PAN_LANE := 103
 const ADD_INSTRUMENT_VOLUME_LANE := 104
 const ADD_INSTRUMENT_PITCH_LANE := 105
 const LOOP_SOUND := 106
+const FIT_TEMPO := 107
+const TAP_RESET := 2.0 # seconds without a tap that start a new tap-tempo count
 const ADD_EFFECT_LANE := 1000 # + an index into _effect_menu
 const DELETE := 200
 const INSPECT := 201
@@ -33,6 +35,15 @@ var _status: Label
 var _event: ChirpEvent
 var _item_label := "" # what the transport plays when it isn't a timeline (snapshot, other event)
 var _shown_item: Variant # what show_item() was given
+var _tempo_box: HBoxContainer # the toolbar's tempo controls (TIMELINE events)
+var _bpm: SpinBox
+var _beats_per_bar: SpinBox
+var _tap: Button
+var _taps := PackedFloat64Array() # tap-tempo times, seconds
+var _fit_dialog: ConfirmationDialog
+var _fit_bars: SpinBox
+var _fit_result: Label
+var _fit_instrument: ChirpInstrument
 var _view: TimelineView
 var _title: Button # opens the shown event or snapshot in the Inspector
 var _snap: OptionButton
@@ -107,6 +118,7 @@ func setup(plugin: EditorPlugin, chirp: Node) -> void:
 	_snap.item_selected.connect(func(index: int) -> void: _view.model.snap = index)
 	toolbar.add_child(_snap)
 	toolbar.add_child(VSeparator.new())
+	_build_tempo_controls(toolbar)
 	_tool_button(toolbar, "ZoomLess", "Zoom out", func() -> void: _zoom(1.0 / 1.4))
 	_tool_button(toolbar, "ZoomMore", "Zoom in", func() -> void: _zoom(1.4))
 	_tool_button(toolbar, "DistractionFree", "Fit the whole timeline", func() -> void:
@@ -230,6 +242,7 @@ func _process(delta: float) -> void:
 		return
 	var model := _view.model
 	_status.text = _preview.status_text()
+	_sync_tempo_controls()
 	_check_in -= delta
 	if _check_in <= 0.0:
 		refresh_issues()
@@ -339,6 +352,9 @@ func _on_context_requested(screen_position: Vector2, hit: Dictionary) -> void:
 				_context.add_icon_item(_icon("Loop"), "Add Loop Region Over This Sound", LOOP_SOUND)
 				_context.set_item_disabled(_context.get_item_index(LOOP_SOUND),
 					_view.model.sound_end_unit(_context_resource) == INF)
+				_context.add_icon_item(_icon("Timer"), "Fit Tempo to This Sound...", FIT_TEMPO)
+				_context.set_item_disabled(_context.get_item_index(FIT_TEMPO),
+					TimelineModel.sound_seconds(_context_resource) <= 0.0)
 		_context.add_icon_item(_icon("Remove"), "Delete Lane" if _context_resource is ChirpAutomation else "Delete", DELETE)
 		_context.add_separator()
 	_fill_add_menu(_context)
@@ -393,6 +409,9 @@ func _on_add(id: int, unit: float) -> void:
 		LOOP_SOUND:
 			if _context_resource is ChirpInstrument:
 				_add_sound_loop(_context_resource)
+		FIT_TEMPO:
+			if _context_resource is ChirpInstrument:
+				open_fit_tempo(_context_resource)
 		ADD_INSTRUMENT_VOLUME_LANE, ADD_INSTRUMENT_PITCH_LANE:
 			if _context_resource is ChirpInstrument:
 				_add_lane(ADD_VOLUME_LANE if id == ADD_INSTRUMENT_VOLUME_LANE else ADD_PITCH_LANE, at, _context_resource)
@@ -453,6 +472,150 @@ func _add_marker(kind: int, at: float) -> void:
 	if marker.kind == ChirpMarker.Kind.MARKER or marker.kind == ChirpMarker.Kind.DESTINATION:
 		marker.name = "%s %d" % ["marker" if marker.kind == ChirpMarker.Kind.MARKER else "destination", _event.markers.size() + 1]
 	_add_to("markers", marker, "Add %s" % ChirpMarker.Kind.keys()[kind].capitalize())
+
+
+# --- tempo --------------------------------------------------------------------------
+
+func _build_tempo_controls(toolbar: HBoxContainer) -> void:
+	_tempo_box = HBoxContainer.new()
+	toolbar.add_child(_tempo_box)
+	var label := Label.new()
+	label.text = "Tempo"
+	_tempo_box.add_child(label)
+	_bpm = SpinBox.new()
+	_bpm.min_value = 20.0
+	_bpm.max_value = 400.0
+	_bpm.step = 0.01
+	_bpm.suffix = "BPM"
+	_bpm.select_all_on_focus = true
+	_bpm.tooltip_text = "The tempo from the event's first TEMPO marker on (one is added at the start if there's none)"
+	_bpm.value_changed.connect(func(value: float) -> void: _set_first_tempo(value, int(_beats_per_bar.value)))
+	_tempo_box.add_child(_bpm)
+	_beats_per_bar = SpinBox.new()
+	_beats_per_bar.min_value = 1
+	_beats_per_bar.max_value = 32
+	_beats_per_bar.suffix = "/ 4"
+	_beats_per_bar.tooltip_text = "Beats per bar"
+	_beats_per_bar.value_changed.connect(func(value: float) -> void: _set_first_tempo(_bpm.value, int(value)))
+	_tempo_box.add_child(_beats_per_bar)
+	_tap = Button.new()
+	_tap.text = "Tap"
+	_tap.tooltip_text = "Tap along with the music (play it first): from the 4th tap, sets the tempo to your average"
+	_tap.pressed.connect(func() -> void: tap_tempo(Time.get_ticks_usec() / 1000000.0))
+	_tempo_box.add_child(_tap)
+	toolbar.add_child(VSeparator.new())
+
+	_fit_dialog = ConfirmationDialog.new()
+	_fit_dialog.title = "Fit Tempo to Sound"
+	var rows := VBoxContainer.new()
+	_fit_dialog.add_child(rows)
+	var line := HBoxContainer.new()
+	rows.add_child(line)
+	var prompt := Label.new()
+	prompt.text = "The sound is"
+	line.add_child(prompt)
+	_fit_bars = SpinBox.new()
+	_fit_bars.min_value = 1
+	_fit_bars.max_value = 512
+	_fit_bars.suffix = "bars"
+	_fit_bars.value_changed.connect(func(_value: float) -> void: _update_fit_result())
+	line.add_child(_fit_bars)
+	_fit_result = Label.new()
+	rows.add_child(_fit_result)
+	_fit_dialog.confirmed.connect(apply_fit_tempo)
+	add_child(_fit_dialog)
+
+
+## Asks how many bars [param instrument]'s sound is, to set the tempo so it fits exactly.
+func open_fit_tempo(instrument: ChirpInstrument) -> void:
+	_fit_instrument = instrument
+	_fit_bars.set_value_no_signal(_view.model.suggest_bars(instrument))
+	_update_fit_result()
+	_fit_dialog.popup_centered()
+
+
+func _fit_numbers() -> Dictionary:
+	var tempo := _view.model.tempo_marker_at(_fit_instrument.start)
+	var beats_per_bar := tempo.beats_per_bar if tempo else 4
+	return {bpm = TimelineModel.fit_bpm(TimelineModel.sound_seconds(_fit_instrument), int(_fit_bars.value), beats_per_bar),
+		beats_per_bar = beats_per_bar}
+
+
+func _update_fit_result() -> void:
+	if _fit_instrument == null:
+		return
+	var numbers := _fit_numbers()
+	_fit_result.text = "→ %.2f BPM, %d/4, from where the sound starts (%s s long)" % [numbers.bpm,
+		numbers.beats_per_bar, snappedf(TimelineModel.sound_seconds(_fit_instrument), 0.001)]
+
+
+## Sets the tempo from the fit dialog: a TEMPO marker where the sound starts (the bar line).
+func apply_fit_tempo() -> void:
+	if _fit_instrument == null:
+		return
+	var numbers := _fit_numbers()
+	_apply_tempo(_fit_instrument.start, numbers.bpm, numbers.beats_per_bar, "Fit Tempo to Sound")
+
+
+## Tap tempo: [param now] in seconds. From the 4th tap in a row, sets the first tempo marker.
+func tap_tempo(now: float) -> void:
+	if not _taps.is_empty() and now - _taps[_taps.size() - 1] > TAP_RESET:
+		_taps.clear()
+	_taps.append(now)
+	var bpm := TimelineModel.tap_bpm(_taps)
+	_tap.text = "Tap (%d)" % _taps.size() if bpm <= 0.0 else "Tap ✓"
+	if bpm > 0.0:
+		_set_first_tempo(clampf(bpm, _bpm.min_value, _bpm.max_value), int(_beats_per_bar.value), true)
+
+
+func _set_first_tempo(bpm: float, beats_per_bar: int, merge := true) -> void:
+	var first := _view.model.first_tempo_marker()
+	_apply_tempo(first.position if first else 0.0, bpm, beats_per_bar, "Set Tempo", merge)
+
+
+## Sets the TEMPO marker at [param at] (adding one if there's none there), undoably. [param merge]
+## folds a run of changes (spin box steps, taps) into one undo step.
+func _apply_tempo(at: float, bpm: float, beats_per_bar: int, action: String, merge := false) -> void:
+	if _event == null:
+		return
+	var existing: ChirpMarker = null
+	for marker in _event.markers:
+		if marker and marker.kind == ChirpMarker.Kind.TEMPO and absf(marker.position - at) < TimelineModel.EPSILON:
+			existing = marker
+	var undo_redo := _plugin.get_undo_redo()
+	undo_redo.create_action(action, UndoRedo.MERGE_ENDS if merge else UndoRedo.MERGE_DISABLE, _event)
+	if existing:
+		for property: String in ["bpm", "beats_per_bar"]:
+			undo_redo.add_do_property(existing, property, bpm if property == "bpm" else beats_per_bar)
+			undo_redo.add_undo_property(existing, property, existing.get(property))
+	else:
+		var marker := ChirpMarker.new()
+		marker.kind = ChirpMarker.Kind.TEMPO
+		marker.position = at
+		marker.bpm = bpm
+		marker.beats_per_bar = beats_per_bar
+		var before: Array = _event.markers.duplicate()
+		var after := before.duplicate()
+		after.append(marker)
+		undo_redo.add_do_property(_event, "markers", after)
+		undo_redo.add_undo_property(_event, "markers", before)
+	undo_redo.add_do_method(self, "_changed", _event)
+	undo_redo.add_undo_method(self, "_changed", _event)
+	undo_redo.commit_action()
+
+
+## Keeps the tempo controls showing the first TEMPO marker (unless being typed in).
+func _sync_tempo_controls() -> void:
+	_tempo_box.visible = _event != null and _event.sheet_mode == ChirpEvent.SheetMode.TIMELINE
+	if not _tempo_box.visible:
+		return
+	var first := _view.model.first_tempo_marker()
+	var line_edits := [_bpm.get_line_edit(), _beats_per_bar.get_line_edit()]
+	if line_edits.any(func(edit: LineEdit) -> bool: return edit.has_focus()):
+		return
+	_bpm.set_value_no_signal(first.bpm if first else TimelineModel.Timeline.DEFAULT_BPM)
+	_beats_per_bar.set_value_no_signal(first.beats_per_bar if first else 4)
+	_beats_per_bar.suffix = "/ %d" % (first.beat_unit if first else 4)
 
 
 ## What the title opens in the Inspector: the snapshot or event shown, or for a plain audio
