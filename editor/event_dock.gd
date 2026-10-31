@@ -19,6 +19,7 @@ const ADD_PITCH_LANE := 102
 const ADD_PAN_LANE := 103
 const ADD_INSTRUMENT_VOLUME_LANE := 104
 const ADD_INSTRUMENT_PITCH_LANE := 105
+const LOOP_SOUND := 106
 const ADD_EFFECT_LANE := 1000 # + an index into _effect_menu
 const DELETE := 200
 const INSPECT := 201
@@ -31,8 +32,9 @@ var _preview: PreviewPanel
 var _status: Label
 var _event: ChirpEvent
 var _item_label := "" # what the transport plays when it isn't a timeline (snapshot, other event)
+var _shown_item: Variant # what show_item() was given
 var _view: TimelineView
-var _title: Label
+var _title: Button # opens the shown event or snapshot in the Inspector
 var _snap: OptionButton
 var _add: MenuButton
 var _context := PopupMenu.new()
@@ -66,10 +68,17 @@ func setup(plugin: EditorPlugin, chirp: Node) -> void:
 	add_child(box)
 	var toolbar := HBoxContainer.new()
 	box.add_child(toolbar)
-	_title = Label.new()
+	_title = Button.new()
+	_title.flat = true
+	_title.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	_title.text = "Select an event or snapshot"
+	_title.tooltip_text = "Open it in the Inspector"
 	_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_title.clip_text = true
+	_title.pressed.connect(func() -> void:
+		var item := _shown_resource()
+		if item:
+			EditorInterface.inspect_object(item, "", true))
 	_title.custom_minimum_size.x = 80 * EditorInterface.get_editor_scale()
 	toolbar.add_child(_title)
 	toolbar.add_child(_preview.transport)
@@ -150,9 +159,11 @@ func setup(plugin: EditorPlugin, chirp: Node) -> void:
 	_view.waveforms = _waveforms
 
 	var hint := Label.new()
-	hint.text = "Space plays/stops · click an automation lane to add points · drop audio files to add (Shift: as one playlist) · double-click or F2 renames a marker · drag to move · drag edges to resize · Shift: no snap · right-click to add · Del deletes · Ctrl/Cmd+wheel zooms · Shift+wheel scrolls · click the ruler to seek"
+	hint.text = "Space plays/stops · click an automation lane to add points · drop audio files to add (Shift: as one playlist) · double-click or F2 renames a marker · drag to move · drag edges to resize · edges snap to the grid and to sound and marker edges (Shift: no snap) · right-click to add · Del deletes · Ctrl/Cmd+wheel zooms · Shift+wheel scrolls · click the ruler to seek"
 	hint.add_theme_color_override(&"font_color", EditorInterface.get_editor_theme().get_color(&"disabled_font_color", &"Editor"))
-	hint.clip_text = true
+	hint.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	hint.tooltip_text = "\n".join(hint.text.split(" · ")) # all of it, one per line, when the dock is narrow
+	hint.mouse_filter = Control.MOUSE_FILTER_PASS
 	box.add_child(hint)
 
 	_context.id_pressed.connect(func(id: int) -> void: _on_add(id, _context_unit))
@@ -165,6 +176,7 @@ func show_item(item: Variant) -> void:
 	if not (item is String or item is ChirpEvent or item is ChirpSnapshot):
 		return # VCAs, global parameters...: nothing to audition
 	var event := _preview.show_item(item)
+	_shown_item = item
 	if item is ChirpSnapshot:
 		_item_label = "Snapshot: %s" % (item.name if item.name else "(unnamed)")
 	elif item is String:
@@ -323,6 +335,10 @@ func _on_context_requested(screen_position: Vector2, hit: Dictionary) -> void:
 		if _context_resource is ChirpInstrument:
 			_context.add_icon_item(_icon("Curve"), "Add Volume Automation (this instrument)", ADD_INSTRUMENT_VOLUME_LANE)
 			_context.add_icon_item(_icon("Curve"), "Add Pitch Automation (this instrument)", ADD_INSTRUMENT_PITCH_LANE)
+			if not _view.model.is_sheet():
+				_context.add_icon_item(_icon("Loop"), "Add Loop Region Over This Sound", LOOP_SOUND)
+				_context.set_item_disabled(_context.get_item_index(LOOP_SOUND),
+					_view.model.sound_end_unit(_context_resource) == INF)
 		_context.add_icon_item(_icon("Remove"), "Delete Lane" if _context_resource is ChirpAutomation else "Delete", DELETE)
 		_context.add_separator()
 	_fill_add_menu(_context)
@@ -374,6 +390,9 @@ func _on_add(id: int, unit: float) -> void:
 			_add_to("instruments", instrument, "Add Instrument")
 		ADD_VOLUME_LANE, ADD_PITCH_LANE, ADD_PAN_LANE:
 			_add_lane(id, at)
+		LOOP_SOUND:
+			if _context_resource is ChirpInstrument:
+				_add_sound_loop(_context_resource)
 		ADD_INSTRUMENT_VOLUME_LANE, ADD_INSTRUMENT_PITCH_LANE:
 			if _context_resource is ChirpInstrument:
 				_add_lane(ADD_VOLUME_LANE if id == ADD_INSTRUMENT_VOLUME_LANE else ADD_PITCH_LANE, at, _context_resource)
@@ -434,6 +453,34 @@ func _add_marker(kind: int, at: float) -> void:
 	if marker.kind == ChirpMarker.Kind.MARKER or marker.kind == ChirpMarker.Kind.DESTINATION:
 		marker.name = "%s %d" % ["marker" if marker.kind == ChirpMarker.Kind.MARKER else "destination", _event.markers.size() + 1]
 	_add_to("markers", marker, "Add %s" % ChirpMarker.Kind.keys()[kind].capitalize())
+
+
+## What the title opens in the Inspector: the snapshot or event shown, or for a plain audio
+## file's event path, the audio file.
+func _shown_resource() -> Resource:
+	if _shown_item is Resource:
+		return _shown_item
+	if _event == null:
+		return null
+	if _event.resource_path.is_empty() and _event.instruments.size() == 1 and _event.instruments[0] \
+			and not _event.instruments[0].streams.is_empty():
+		return _event.instruments[0].streams[0]
+	return _event
+
+
+## A LOOP_REGION exactly over [param instrument]'s sound (to its block's end if that comes first):
+## sample-exact for any format, since the region ends where the sound does.
+func _add_sound_loop(instrument: ChirpInstrument) -> void:
+	var span := _view.model.instrument_span(instrument)
+	var end := minf(_view.model.sound_end_unit(instrument), span.y)
+	if end == INF or end <= instrument.start:
+		return
+	var marker := ChirpMarker.new()
+	marker.kind = ChirpMarker.Kind.LOOP_REGION
+	marker.position = instrument.start
+	marker.end = end
+	_add_to("markers", marker, "Add Loop Region Over Sound")
+	_view.selected = marker
 
 
 ## Applies a TimelineModel.plan_drop() result as one undoable action.
