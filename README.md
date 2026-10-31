@@ -20,6 +20,7 @@ No native libraries, so it runs anywhere Godot does (desktop, Android, iOS, web)
 - [Quick start](#quick-start)
 - [Events and event paths](#events-and-event-paths)
   - [Scatterer and programmer instruments](#scatterer-and-programmer-instruments)
+  - [Audio formats](#audio-formats)
 - [Playing events from code](#playing-events-from-code)
   - [Loading](#loading)
 - [Instances and their lifecycle](#instances-and-their-lifecycle)
@@ -145,6 +146,31 @@ Chirp.events.programmer_sound_provider = func(key: String, _instance) -> AudioSt
 ```
 
 Instances also emit `programmer_sound_requested(key, instrument)` just before the lookup.
+
+### Audio formats
+
+Chirp plays whatever Godot imports. Which format matters for music that loops or follows the
+beat:
+
+| Format | Size (32 s stereo track) | Length and start | Use it for |
+|---|---|---|---|
+| **Ogg Vorbis** | ~450 KB at quality 5 | Sample-exact | Music, ambience, long sounds |
+| **WAV** (Import dock → Compress Mode: **QOA**) | ~1.2 MB in the exported game | Sample-exact | Short SFX; loops with an intro or outro in the same file |
+| **MP3** | ~650 KB at 160 kbps | Exact only with gapless info | One-shot SFX and dialogue |
+
+**Why not MP3 for music:** MP3 encoders add silence at the start (encoder delay) and end
+(padding). Godot trims it only when the file has a LAME/Xing header. Logic Pro and other Apple
+encoders write the amounts in their own `iTunSMPB` tag instead, which Godot ignores. A 32.000 s
+track from Logic then plays as 32.064 s: the music starts ~22 ms late (11 ms of encoder delay plus
+the decoder's own), every beat lands late against the grid, Fit Tempo reads 119.76 BPM instead of
+120, and each loop ends with ~42 ms of silence. MP3s from ffmpeg / LAME carry the header and are
+exact; to check a file, see whether Godot's length for it matches your DAW's.
+
+**From a DAW:** bounce WAV, then convert once to Ogg Vorbis, e.g. Audacity (File → Export → OGG)
+or `ffmpeg -i bgm.wav -c:a libvorbis -q:a 5 bgm.ogg` (quality 4 for ambience, 6 if you hear
+artifacts). Don't convert from an MP3: that stacks a second lossy encode on the first. Keep the WAV
+masters out of the project, or in a folder holding an empty `.gdignore` file so Godot neither
+imports nor exports them.
 
 ## Playing events from code
 
@@ -286,11 +312,9 @@ and transitions line up with the music. **Add Loop Region Over This Sound** on t
 the whole sound, and while dragging, edges snap to where sounds, blocks, markers and regions start
 and end (Shift turns snapping off).
 
-**Use WAV or Ogg Vorbis for music that loops or follows the beat.** MP3 encoders pad the
-start and end with a few dozen milliseconds of silence. Godot trims it only when the file carries
-gapless info (a LAME/Xing header), and some exporters leave it out: the track then reads as e.g.
-32.064 s instead of 32 s, every beat is late by the start padding, and loops have a gap. WAV
-imported with **Compress Mode: QOA** is small and sample-exact; Ogg Vorbis is exact too.
+**Use Ogg Vorbis (or WAV) for music that loops or follows the beat**, not MP3: MP3s from Logic and
+other Apple encoders carry silent padding Godot doesn't trim, which makes beats late and loops gap.
+See [Audio formats](#audio-formats).
 
 **Transitions** cut by default. Set a transition's `transition_mode` to `CROSSFADE` (fade the old
 section out and the new one in) or `BRIDGE` (hold, fading the old section out, then jump), with a
@@ -345,7 +369,9 @@ region's end without a seam. It applies when:
 
 - the sound starts by the region's start and reaches its end within one pass;
 - for Ogg Vorbis and MP3, the region ends where the sound does (they can only loop back from their
-  end; WAV can loop any stretch, so prefer WAV for intro / loop / outro in one file);
+  end; WAV can loop any stretch, so prefer WAV for intro / loop / outro in one file). An MP3
+  without gapless info never loops cleanly: its padding is part of the sound
+  ([Audio formats](#audio-formats));
 - the loop is certain: probability 100%, and no sustain point, transition or pending quantized jump
   before the region's end.
 
@@ -520,7 +546,7 @@ changes the project's buses only while something is playing, and puts them back 
 | Tool | Where | What it does |
 |---|---|---|
 | **Chirp** | Right dock | Every event from your sound directories (plain audio files dimmed), plus snapshots, VCAs and global parameters. Filter, select to inspect, double-click to play, drag onto resource slots. **Create Emitter** adds a ChirpEmitter2D/3D for the selected event under the selected node. |
-| **Chirp Event** | Bottom dock | Edit and audition in one place. The toolbar has Play / Stop / Stop Now / Key Off (Space plays and stops) and a live status (state, voices, playhead or sheet value); the side panel has sliders for the event's and the global parameters and a log of beats, markers and Chirp's warnings while auditioning (unknown buses or parameters, missing destinations; toggle the panel from the toolbar). Snapshots and events without a timeline are auditioned here too. The editor area shows TIMELINE events and PARAMETER sheets (instruments along the parameter's range, fades drawn, ruler sets the parameter). A warning button in the toolbar counts authoring problems in the shown event (instruments with no sound, transitions to missing destinations, unknown condition or automation parameters, automations aimed at missing effects, a missing sheet parameter...) plus notes such as a loop region that won't be seamless and why; click it for the list, and click an item to select what it's about. Flagged instruments, markers and lanes get a small triangle (yellow: warning, blue: note). Sound instruments show their waveform (decoded in the background, a few milliseconds per frame; on timelines it lines up with time, start offset and looping included; on parameter sheets the whole sound spans the block, with a progress line through each layer while the preview plays). For timelines: instruments as blocks, markers as flags (flags that would overlap stack in rows; double-click or F2 renames a marker, and renaming a destination updates the transitions that point to it), regions in stacked rows, volume and pitch automation lanes (click to add points, drag, right-click or Delete to remove; on parameter sheets they draw along the parameter), tempo controls in the toolbar (BPM, beats per bar, tap tempo; right-click a sound → Fit Tempo to This Sound… or Add Loop Region Over This Sound), mute / solo buttons and a volume knob on each instrument (M and S only affect the editor preview; drag the knob, double-click for 0 dB), a bar/beat grid from the tempo markers, and the preview playhead. Drop audio files or events from the FileSystem or Chirp dock to add instruments where you drop them (onto a sound instrument: added to its playlist; Shift: several files as one playlist). Drag to move, drag edges to resize (snapping to beat or bar, Shift to ignore), right-click to add or delete, Delete key removes, Ctrl/Cmd+wheel zooms, Shift+wheel scrolls, click the ruler to seek. Click the title to open the event in the Inspector. Everything is undoable. |
+| **Chirp Event** | Bottom dock | Edit and audition in one place. The toolbar has Play / Stop / Stop Now / Key Off (Space plays and stops) and a live status (state, voices, playhead or sheet value); the side panel has sliders for the event's and the global parameters and a log of beats, markers and Chirp's warnings while auditioning (unknown buses or parameters, missing destinations; toggle the panel from the toolbar). Snapshots and events without a timeline are auditioned here too. The editor area shows TIMELINE events and PARAMETER sheets (instruments along the parameter's range, fades drawn, ruler sets the parameter). A warning button in the toolbar counts authoring problems in the shown event (instruments with no sound, transitions to missing destinations, unknown condition or automation parameters, automations aimed at missing effects, a missing sheet parameter...) plus notes such as a loop region that won't be seamless and why; click it for the list, and click an item to select what it's about. Flagged instruments, markers and lanes get a small triangle (yellow: warning, blue: note). Sound instruments show their waveform (decoded in the background, a few milliseconds per frame; on timelines it lines up with time, start offset and looping included; on parameter sheets the whole sound spans the block, with a progress line through each layer while the preview plays). For timelines: instruments as blocks, markers as flags (flags that would overlap stack in rows; double-click or F2 renames a marker, and renaming a destination updates the transitions that point to it), regions in stacked rows, volume and pitch automation lanes (click to add points, drag, right-click or Delete to remove; on parameter sheets they draw along the parameter), tempo controls in the toolbar (BPM, beats per bar, tap tempo; right-click a sound → Fit Tempo to This Sound… or Add Loop Region Over This Sound), mute / solo buttons and a volume knob on each instrument (M and S only affect the editor preview; drag the knob, double-click for 0 dB), a bar/beat grid from the tempo markers, and the preview playhead. Drop audio files or events from the FileSystem or Chirp dock to add instruments where you drop them (onto a sound instrument: added to its playlist; Shift: several files as one playlist). Drag to move, drag edges to resize (snapping to beat or bar and to sound, block, marker and region edges; Shift to ignore), right-click to add or delete, Delete key removes, Ctrl/Cmd+wheel zooms, Shift+wheel scrolls, click the ruler to seek. Click the title to open the event in the Inspector. Everything is undoable. |
 | **Chirp profiler** | Debugger → Chirp | While the game runs from the editor: voices in use (real / virtual / budget) with a graph, effect buses, every playing instance (event, state, sounds, bus, timeline position, level at the listener; virtual ones dimmed), a meter per bus with its fader and any ducking, active snapshots and global parameter values. Updated four times a second; costs nothing in exported games. The same data is available in game from `Chirp.get_stats()` for your own overlay. |
 | **Inspector** | | A **Preview** button on events and snapshots; a searchable picker for emitters' `event_path`. |
 | **Gizmos** | 2D / 3D viewports | Max distance circle (2D) or unit size and max distance spheres (3D) on emitters, with drag handles when `override_attenuation` is on; dimmed event values otherwise. |
@@ -574,4 +600,7 @@ One page per class, in the layout of Godot's class reference.
 - **Frame timing.** Chirp runs once per frame, so delays, markers, beats and jumps are accurate to
   a frame (about 17 ms at 60 FPS), not a sample.
 - **Members starting with `_`** are internal and may change between versions.
+- **MP3 padding.** MP3s without a LAME/Xing header (e.g. from Logic Pro) play with their encoder
+  padding, so they start late and can't loop cleanly. Use Ogg Vorbis; see
+  [Audio formats](#audio-formats).
 - Exported games and mobile devices are not yet tested.
