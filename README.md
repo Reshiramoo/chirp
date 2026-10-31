@@ -44,6 +44,7 @@ No native libraries, so it runs anywhere Godot does (desktop, Android, iOS, web)
 - [Class reference](#class-reference)
 - [Troubleshooting](#troubleshooting)
 - [Limitations](#limitations)
+- [Support](#support)
 - [License](#license)
 
 ## Requirements
@@ -706,6 +707,12 @@ One page per class, in the layout of Godot's class reference.
   padding, so they start late and can't loop cleanly. Use Ogg Vorbis; see
   [Audio formats](#audio-formats).
 - Exported games and mobile devices are not yet tested.
+
+## Support
+
+Found a bug or have an idea? [Open an issue](https://github.com/Reshiramoo/chirp/issues) and mention
+your Godot and Chirp versions. For anything else, email
+[support@reshiramoo.com](mailto:support@reshiramoo.com).
 
 ## License
 
