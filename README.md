@@ -1,3 +1,5 @@
+<img src=".github/icon.png" alt="" width="128" align="right">
+
 # Chirp
 
 Sound design plugin for Godot 4.6+: FMOD-style audio events, built entirely on Godot's own audio engine.
@@ -14,10 +16,15 @@ No native libraries, so it runs anywhere Godot does (desktop, Android, iOS, web)
 - **Editor tools**: an event browser, a preview dock with live parameter sliders, a visual timeline
   editor and attenuation gizmos.
 
+![An adaptive music event in the Chirp Event dock: intro, a verse that loops until Intensity reaches 0.5, then a jump to the chorus on the next bar](docs/images/timeline.png)
+
 ## Contents
 
+- [Requirements](#requirements)
 - [Installation](#installation)
 - [Quick start](#quick-start)
+- [Building events in the editor](#building-events-in-the-editor)
+  - [Example: adaptive music](#example-adaptive-music)
 - [Events and event paths](#events-and-event-paths)
   - [Scatterer and programmer instruments](#scatterer-and-programmer-instruments)
   - [Audio formats](#audio-formats)
@@ -35,16 +42,25 @@ No native libraries, so it runs anywhere Godot does (desktop, Android, iOS, web)
   - [Parameter triggers](#parameter-triggers)
 - [Editor tools](#editor-tools)
 - [Class reference](#class-reference)
+- [Troubleshooting](#troubleshooting)
 - [Limitations](#limitations)
+- [License](#license)
+
+## Requirements
+
+- Godot **4.6** or later (it uses the editor dock API added in 4.6).
+- Any renderer and any platform Godot exports to: Chirp is GDScript on top of Godot's own
+  `AudioServer` and stream players, with no native libraries.
+- Audio as `.wav`, `.ogg` or `.mp3`, imported as usual. Chirp doesn't change import settings.
 
 ## Installation
 
-1. Clone this repository into your project's `addons` folder as `chirp`:
-   ```bash
-   git clone https://github.com/Reshiramoo/chirp.git addons/chirp
-   ```
-   (or add it as a submodule: `git submodule add https://github.com/Reshiramoo/chirp.git addons/chirp`).
-   The folder must be named `chirp`.
+1. Get the plugin into your project's `addons/chirp` folder, either way:
+   - **AssetLib:** in the editor's **AssetLib** tab, search for **Chirp**, then **Download** and
+     **Install**.
+   - **By hand:** download this repository (**Code → Download ZIP**, or a release) and copy its
+     `addons/chirp` folder into your project's `addons` folder. With git, clone it anywhere and copy
+     or symlink that folder.
 2. **Project → Project Settings → Plugins** → enable **Chirp**. This adds the `Chirp` autoload
    (see [Chirp](docs/classes/Chirp.md)).
 3. Set up the **Chirp** section of Project Settings:
@@ -87,6 +103,57 @@ music.release()    # free it once it has stopped
 
 Or skip code: add a [ChirpEmitter2D](docs/classes/ChirpEmitter2D.md) /
 [ChirpEmitter3D](docs/classes/ChirpEmitter3D.md), pick the event and set `play_on`.
+
+## Building events in the editor
+
+A plain audio file is already an event. Make a [ChirpEvent](docs/classes/ChirpEvent.md) when a
+sound needs variations, layers, parameters or music structure:
+
+1. In the FileSystem dock, right-click the folder in your sound directory → **Create New →
+   Resource…** → **ChirpEvent**. Its path is the file's, like an audio file's:
+   `res://assets/sounds/sfxs/footstep.tres` plays as `"event:/sfxs/footstep"`. Saved next to an
+   audio file with the same name, it replaces that file's event.
+2. In the Inspector, add a ChirpInstrument to **Instruments** and put the sounds in its
+   **Streams**: several streams make a playlist, like a footstep with three variations. Set
+   `random_pitch_semitones` and `random_volume_db` so repeats don't sound identical. For
+   **Timeline** and **Parameter** sheets, drag audio files from the FileSystem dock straight onto
+   the Chirp Event dock instead (Shift: several files as one playlist).
+3. Select the event and open the **Chirp Event** tab in the bottom panel. Press **Play** (or
+   Space) to audition. The side panel has a slider for each parameter, so you
+   hear changes as you make them; the log shows beats, markers and Chirp's warnings.
+4. Watch the warning button in the toolbar: it counts problems in the event (instruments with no
+   sound, transitions to missing destinations, unknown parameters...). Click an item to select
+   what it's about.
+
+The **Chirp** dock on the right lists every event path, so you can check the name game code
+should use, double-click to play, or drag an event onto an emitter's `event` slot.
+
+### Example: adaptive music
+
+The track in the screenshot above, step by step: an intro, then a verse that loops while
+`Intensity` is low, and a jump to the chorus on the next bar once it reaches 0.5, with a stinger.
+
+1. Put the stems in a sound directory (`intro.wav`, `drums.wav`, `bass.wav`, `lead_verse.wav`,
+   `lead_chorus.wav`, `stinger.wav`) and create `main.tres` next to them.
+2. In the Inspector set **Sheet Mode** to **Timeline**, and add a ChirpParameter named
+   `Intensity` (0 to 1) to **Parameters**.
+3. In the Chirp Event dock, drop `intro.wav` at the start, the drums, bass and verse lead where
+   the intro ends, and the chorus lead after the verse. Snap keeps them on the beat grid.
+4. Right-click the timeline to add markers where you click: a **Tempo** at the start (120 BPM,
+   4/4), **Destination**s named `verse` and `chorus`, a **Loop Region** over the verse and a
+   **Transition Region** over it too. Drag a region's edges to fit it to the section.
+5. Right-click each region → **Inspect** and give it a condition: the loop holds while
+   `Intensity` is 0 to 0.5; the transition goes to `chorus` while it's 0.5 to 1, with
+   **Quantization** set to **Bar**, and a ChirpEvent playing `stinger.wav` as its **Transition Event**. A second loop
+   region over the chorus keeps it going.
+6. Play, and drag the `Intensity` slider past 0.5: the music finishes the bar, the stinger hits
+   and the chorus starts. **Add → Add Volume Automation** draws a fade-in over the intro.
+
+In the game, one line drives it:
+
+```gdscript
+music.set_parameter("Intensity", 1.0)   # the chorus starts on the next bar
+```
 
 ## Events and event paths
 
@@ -398,6 +465,8 @@ A car engine, with an `RPM` parameter from 0 to 6000 and looping layers:
 engine.set_parameter("RPM", rpm)   # give RPM a seek_speed to glide smoothly between layers
 ```
 
+![The engine as a parameter sheet: three looping layers crossfading along RPM, with a volume curve under them](docs/images/parameter_sheet.png)
+
 Automation lanes work on parameter sheets too: **Add → Add Volume Automation** draws the event's
 volume (or pitch) along the sheet parameter, e.g. the whole engine getting louder with RPM, and an
 instrument's own lanes shape that layer alone. (For a simple crossfade, the instruments' `fade_in`
@@ -539,6 +608,8 @@ Area2D "Arena"
 
 ## Editor tools
 
+<img src="docs/images/browser.png" align="right" width="230" alt="The Chirp dock listing events, snapshots, VCAs and global parameters">
+
 Enabling the plugin adds two docks, a debugger tab and some inspector helpers. Sounds play through a private
 preview copy of Chirp, so nothing leaks into your game. Previewing snapshots or bus automation
 changes the project's buses only while something is playing, and puts them back afterwards.
@@ -595,6 +666,19 @@ One page per class, in the layout of Godot's class reference.
 | [ChirpParameterTrigger](docs/classes/ChirpParameterTrigger.md) | Node | Sets parameters on emitters, on triggers. |
 | [ChirpGlobalParameterTrigger](docs/classes/ChirpGlobalParameterTrigger.md) | Node | Sets global parameters, on triggers. |
 
+<br clear="right">
+
+## Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| `Chirp: unknown event '…'` error | The path starts with the sound directory's folder name: `res://audio/coin.mp3` is `"event:/audio/coin"`. The error suggests the closest paths, and the Chirp dock lists them all. A new file needs a moment to import; the dock's reload button rescans. |
+| A sound plays on Master instead of its bus | The bus named in `chirp/sound_directories` or the event's `bus` doesn't exist in the **Audio** panel (names are case-sensitive). Chirp warns in the Output and in the Chirp Event log. |
+| A small hitch the first time a sound plays | Its file loads on first use. Preload the events a level needs with `Chirp.events.preload_events()`, or tick `preload_event` on emitters. |
+| A music loop has a gap at the seam | The warning button in the Chirp Event dock explains why that loop region can't loop in the mixer (for Ogg and MP3, the region has to end where the sound does). WAV can loop any stretch. |
+| Some events play without their effects | More instances with `effects` are playing than `chirp/effect_bus_pool_size` allows; raise it, or share one bus with `effect_scope = EVENT`. |
+| Sounds keep playing in the pause menu | Pause by bus with `Chirp.mixer.set_bus_paused()` or everything with `pause_all(true)`; Chirp doesn't follow `get_tree().paused` for you. |
+
 ## Limitations
 
 - **Frame timing.** Chirp runs once per frame, so delays, markers, beats and jumps are accurate to
@@ -607,3 +691,7 @@ One page per class, in the layout of Godot's class reference.
   padding, so they start late and can't loop cleanly. Use Ogg Vorbis; see
   [Audio formats](#audio-formats).
 - Exported games and mobile devices are not yet tested.
+
+## License
+
+Chirp is released under the [MIT License](LICENSE).
