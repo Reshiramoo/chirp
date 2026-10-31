@@ -598,7 +598,10 @@ One page per class, in the layout of Godot's class reference.
 ## Limitations
 
 - **Frame timing.** Chirp runs once per frame, so delays, markers, beats and jumps are accurate to
-  a frame (about 17 ms at 60 FPS), not a sample.
+  a frame (about 17 ms at 60 FPS), not a sample. It advances by real elapsed time, not Godot's
+  `delta` (which is smoothed and scaled by `Engine.time_scale`), so timelines stay with the music
+  through hitches and slow motion. A stall of over a second (or the app returning from the
+  background) isn't caught up on; sounds re-sync at the next loop or jump.
 - **Members starting with `_`** are internal and may change between versions.
 - **MP3 padding.** MP3s without a LAME/Xing header (e.g. from Logic Pro) play with their encoder
   padding, so they start late and can't loop cleanly. Use Ogg Vorbis; see

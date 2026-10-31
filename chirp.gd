@@ -45,6 +45,8 @@ const DEBUGGER_INTERVAL := 0.25 # seconds between stats sent to the editor's Chi
 
 var _voice_root: Node
 var _debugger_in := 0.0
+const MAX_TICK := 1.0 # seconds: a longer gap (the app was suspended) isn't played catch-up on
+var _clock_usec := 0 # Time.get_ticks_usec() at the last frame, 0 to restart the clock
 var _warned := {}
 var _muted := {} # ChirpInstrument -> true (auditioning)
 var _soloed := {} # ChirpInstrument -> true (auditioning)
@@ -100,6 +102,17 @@ func reload_settings() -> void:
 
 
 func _process(delta: float) -> void:
+	var now := Time.get_ticks_usec()
+	var elapsed := (now - _clock_usec) / 1000000.0 if _clock_usec > 0 else delta
+	_clock_usec = now
+	_tick(clampf(elapsed, 0.0, MAX_TICK))
+
+
+## Advances Chirp by [param delta] seconds. _process() feeds it the real time since the last
+## frame rather than Godot's delta, which is smoothed (application/run/delta_smoothing) and scaled
+## by Engine.time_scale: the audio plays in real time, so timelines, beats and delays must too, or
+## they slip a frame against the music after every hitch.
+func _tick(delta: float) -> void:
 	parameters._process(delta)
 	events._process(delta)
 	mixer._process(delta)
@@ -172,6 +185,8 @@ func _exit_tree() -> void:
 func _notification(what: int) -> void:
 	if Engine.is_editor_hint():
 		return
+	if what == NOTIFICATION_APPLICATION_RESUMED:
+		_clock_usec = 0 # the time away isn't time the sounds played
 	if what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_APPLICATION_RESUMED:
 		if ProjectSettings.get_setting(SETTING_PAUSE_IN_BACKGROUND, true):
 			mixer._background_paused = what == NOTIFICATION_APPLICATION_PAUSED
