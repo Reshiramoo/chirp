@@ -35,10 +35,12 @@ No native libraries, so it runs anywhere Godot does (desktop, Android, iOS, web)
 - [Editor tools](#editor-tools)
 - [Class reference](#class-reference)
 - [Limitations](#limitations)
+- [License](#license)
 
 ## Installation
 
-1. Clone this repository into your project's `addons` folder as `chirp`:
+1. Install **Chirp** from the **AssetLib** tab at the top of the editor, which puts it in
+   `addons/chirp`. Or clone this repository into your project's `addons` folder as `chirp`:
    ```bash
    git clone https://github.com/Reshiramoo/chirp.git addons/chirp
    ```
@@ -560,3 +562,7 @@ One page per class, in the layout of Godot's class reference.
   a frame (about 17 ms at 60 FPS), not a sample.
 - **Members starting with `_`** are internal and may change between versions.
 - Exported games and mobile devices are not yet tested.
+
+## License
+
+Chirp is released under the [MIT License](LICENSE).
