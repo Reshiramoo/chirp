@@ -1,3 +1,5 @@
+<img src=".github/icon.png" alt="" width="128" align="right">
+
 # Chirp
 
 Sound design plugin for Godot 4.6+: FMOD-style audio events, built entirely on Godot's own audio engine.
@@ -52,13 +54,12 @@ No native libraries, so it runs anywhere Godot does (desktop, Android, iOS, web)
 
 ## Installation
 
-1. Install **Chirp** from the **AssetLib** tab at the top of the editor, which puts it in
-   `addons/chirp`. Or clone this repository into your project's `addons` folder as `chirp`:
-   ```bash
-   git clone https://github.com/Reshiramoo/chirp.git addons/chirp
-   ```
-   (or add it as a submodule: `git submodule add https://github.com/Reshiramoo/chirp.git addons/chirp`).
-   The folder must be named `chirp`.
+1. Get the plugin into your project's `addons/chirp` folder, either way:
+   - **AssetLib:** in the editor's **AssetLib** tab, search for **Chirp**, then **Download** and
+     **Install**.
+   - **By hand:** download this repository (**Code → Download ZIP**, or a release) and copy its
+     `addons/chirp` folder into your project's `addons` folder. With git, clone it anywhere and copy
+     or symlink that folder.
 2. **Project → Project Settings → Plugins** → enable **Chirp**. This adds the `Chirp` autoload
    (see [Chirp](docs/classes/Chirp.md)).
 3. Set up the **Chirp** section of Project Settings:
