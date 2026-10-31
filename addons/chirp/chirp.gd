@@ -47,6 +47,7 @@ var _voice_root: Node
 var _debugger_in := 0.0
 const MAX_TICK := 1.0 # seconds: a longer gap (the app was suspended) isn't played catch-up on
 var _clock_usec := 0 # Time.get_ticks_usec() at the last frame, 0 to restart the clock
+var _in_real_time := false # inside _process(): time is real, so timelines can follow the music
 var _warned := {}
 var _muted := {} # ChirpInstrument -> true (auditioning)
 var _soloed := {} # ChirpInstrument -> true (auditioning)
@@ -105,7 +106,9 @@ func _process(delta: float) -> void:
 	var now := Time.get_ticks_usec()
 	var elapsed := (now - _clock_usec) / 1000000.0 if _clock_usec > 0 else delta
 	_clock_usec = now
+	_in_real_time = true
 	_tick(clampf(elapsed, 0.0, MAX_TICK))
+	_in_real_time = false
 
 
 ## Advances Chirp by [param delta] seconds. _process() feeds it the real time since the last

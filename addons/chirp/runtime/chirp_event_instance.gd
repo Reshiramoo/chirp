@@ -39,6 +39,11 @@ const RESYNC_TOLERANCE := 0.05
 ## Ogg Vorbis and MP3 can only loop back from their end: a loop region loops them natively when it
 ## ends this close (seconds) to the end of the sound.
 const NATIVE_LOOP_END_TOLERANCE := 0.02
+## How much of the gap between the playhead and the music is closed each frame (see
+## _follow_audio_clock): small enough to smooth out the mixer's chunky position reports.
+const CLOCK_FOLLOW := 0.1
+## A bigger gap than this (seconds) is a seek or start still in flight, not drift: ignored.
+const CLOCK_TRUST := 0.25
 ## AudioStreamPlayer2D.max_distance while Chirp applies the roll-off (effectively no limit).
 const ROLLOFF_FAR := 1.0e7
 
@@ -93,6 +98,7 @@ var _quantized := {} # timeline entry index -> playhead time a quantized instrum
 var _label := "" # how the profiler names it: the event path it was created from
 var _virtual := false # players paused to save the mixer's work; the instance keeps running
 var _parent_id := 0 # nested events: the instance playing this one
+var _clock_nudge := 0.0 # seconds added to the next timeline advance, to follow the music
 var _processed_usec := 0 # when the playhead last moved, for the audible position between frames
 var _beat_waiters: Array[Dictionary] = [] # call_on_beat(): {callback, bar_only, audible}
 
@@ -421,10 +427,12 @@ func _process(delta: float) -> void:
 			_trigger(pending.instrument)
 
 	if _timeline:
-		_advance_timeline(delta)
+		_advance_timeline(maxf(delta + _clock_nudge, 0.0))
+		_clock_nudge = 0.0
 		_processed_usec = Time.get_ticks_usec()
 		_sync_entries()
 		_arm_region_loops()
+		_follow_audio_clock()
 	elif _event.sheet_mode == ChirpEvent.SheetMode.PARAMETER:
 		_sync_sheet()
 	if _virtual:
@@ -783,6 +791,40 @@ func _resync(voice: Voice, expected: float) -> void:
 		voice.child.set_timeline_position(expected)
 	elif voice.instrument.kind == ChirpInstrument.Kind.SILENCE:
 		voice.silence_left = voice.instrument.duration - expected
+
+
+## Keeps the playhead on the music. The playhead counts real time, but the audio runs on the sound
+## card's clock and may start late (e.g. while the audio device wakes up at launch), so each frame
+## this compares where a timeline sound actually is (as mixed) with where the playhead says it
+## should be, and nudges the next advance to close part of the gap. Beats and markers then fire
+## once each, in time with what's heard. Uses the first sound playing at normal pitch on the
+## timeline; without one, the playhead runs on real time alone.
+func _follow_audio_clock() -> void:
+	if not _chirp._in_real_time or _state != State.PLAYING or _applied_paused or _virtual or _sustain \
+			or not _bridge.is_empty() or _jumped:
+		return # (stepped by hand, e.g. in tests, the sounds don't advance: nothing to follow)
+	for entry in _timeline.entries:
+		var voice: Voice = _entry_voices.get(entry.index)
+		if voice == null or voice.player == null or voice.detached or voice.instrument.async_playback \
+				or not voice.player.playing or voice.player.stream_paused \
+				or not is_equal_approx(voice.player.pitch_scale, 1.0):
+			continue
+		var length: float = voice.player.stream.get_length()
+		var heard: float = voice.player.get_playback_position() + AudioServer.get_time_since_last_mix()
+		var expected := _playhead - entry.start + voice.start_shift
+		var period := 0.0
+		if voice.region and _playhead >= voice.region.time and _playhead < voice.region.end:
+			period = voice.region.end - voice.region.time
+		elif length > 0.0 and _player_loops(voice.player):
+			period = length
+			expected = fposmod(expected, length)
+		var error := heard - expected
+		if period > 0.0:
+			error = fposmod(error + period / 2.0, period) - period / 2.0 # it may have wrapped just now
+		if absf(error) > CLOCK_TRUST:
+			continue
+		_clock_nudge = error * CLOCK_FOLLOW
+		return
 
 
 # --- parameter sheet -----------------------------------------------------------------
