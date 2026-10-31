@@ -484,6 +484,7 @@ func _build_tempo_controls(toolbar: Container) -> void:
 	_bpm.max_value = 400.0
 	_bpm.step = 0.01
 	_bpm.suffix = "BPM"
+	_bpm.custom_minimum_size.x = 110 * EditorInterface.get_editor_scale() # fits "119.76 BPM"
 	_bpm.select_all_on_focus = true
 	_bpm.tooltip_text = "The tempo from the event's first TEMPO marker on (one is added at the start if there's none)"
 	_bpm.value_changed.connect(func(value: float) -> void: _set_first_tempo(value, int(_beats_per_bar.value)))

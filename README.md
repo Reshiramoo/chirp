@@ -286,6 +286,12 @@ and transitions line up with the music. **Add Loop Region Over This Sound** on t
 the whole sound, and while dragging, edges snap to where sounds, blocks, markers and regions start
 and end (Shift turns snapping off).
 
+**Use WAV or Ogg Vorbis for music that loops or follows the beat.** MP3 encoders pad the
+start and end with a few dozen milliseconds of silence. Godot trims it only when the file carries
+gapless info (a LAME/Xing header), and some exporters leave it out: the track then reads as e.g.
+32.064 s instead of 32 s, every beat is late by the start padding, and loops have a gap. WAV
+imported with **Compress Mode: QOA** is small and sample-exact; Ogg Vorbis is exact too.
+
 **Transitions** cut by default. Set a transition's `transition_mode` to `CROSSFADE` (fade the old
 section out and the new one in) or `BRIDGE` (hold, fading the old section out, then jump), with a
 `transition_length` in the event's units: `4` beats is a bar of 4/4. `transition_event` plays an
