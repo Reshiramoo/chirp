@@ -813,17 +813,34 @@ func _follow_audio_clock() -> void:
 	if not _chirp._in_real_time or _state != State.PLAYING or _applied_paused or _virtual or _sustain \
 			or not _bridge.is_empty() or _jumped:
 		return # (stepped by hand, e.g. in tests, the sounds don't advance: nothing to follow)
+	var error := _music_gap()
+	if is_nan(error):
+		return
+	if AudioServer.get_time_since_last_mix() > CLOCK_STALL:
+		_clock_hold = true
+		return
+	if absf(error) > CLOCK_TRUST:
+		_clock_doubt += 1
+		if _clock_doubt >= CLOCK_PATIENCE:
+			_playhead += error # straight to the music (beats in between are skipped or repeated)
+			_clock_doubt = 0
+		return
+	_clock_doubt = 0
+	_clock_nudge = error * CLOCK_FOLLOW
+
+
+## Seconds the music is ahead of the playhead, measured on the first sound playing at normal
+## pitch on the timeline; NAN without one. [param frozen]: the sounds are paused, so their
+## position is exact (no time since the last mix to add).
+func _music_gap(frozen := false) -> float:
 	for entry in _timeline.entries:
 		var voice: Voice = _entry_voices.get(entry.index)
 		if voice == null or voice.player == null or voice.detached or voice.instrument.async_playback \
-				or not voice.player.playing or voice.player.stream_paused \
+				or (voice.player.stream_paused != frozen) or not (voice.player.playing or frozen) \
 				or not is_equal_approx(voice.player.pitch_scale, 1.0):
 			continue
-		if AudioServer.get_time_since_last_mix() > CLOCK_STALL:
-			_clock_hold = true
-			return
 		var length: float = voice.player.stream.get_length()
-		var heard: float = voice.player.get_playback_position() + AudioServer.get_time_since_last_mix()
+		var heard: float = voice.player.get_playback_position() + (0.0 if frozen else AudioServer.get_time_since_last_mix())
 		var expected := _playhead - entry.start + voice.start_shift
 		var period := 0.0
 		if voice.region and _playhead >= voice.region.time and _playhead < voice.region.end:
@@ -834,15 +851,8 @@ func _follow_audio_clock() -> void:
 		var error := heard - expected
 		if period > 0.0:
 			error = fposmod(error + period / 2.0, period) - period / 2.0 # it may have wrapped just now
-		if absf(error) > CLOCK_TRUST:
-			_clock_doubt += 1
-			if _clock_doubt >= CLOCK_PATIENCE:
-				_playhead += error # straight to the music (beats in between are skipped or repeated)
-				_clock_doubt = 0
-			return
-		_clock_doubt = 0
-		_clock_nudge = error * CLOCK_FOLLOW
-		return
+		return error
+	return NAN
 
 
 # --- parameter sheet -----------------------------------------------------------------
@@ -1635,6 +1645,13 @@ func _sync_pause() -> void:
 	if paused == _applied_paused:
 		return
 	_applied_paused = paused
+	if not paused and _timeline and not _virtual:
+		# Resuming: the paused sounds know exactly where they stopped, so start the playhead from
+		# there (pausing and resuming each land up to a frame late, which would otherwise add up).
+		var gap := _music_gap(true)
+		if not is_nan(gap) and absf(gap) < CLOCK_TRUST:
+			_playhead += gap
+			_clock_doubt = 0
 	for voice in _voices:
 		if voice.player:
 			voice.player.stream_paused = paused or _virtual
