@@ -42,8 +42,14 @@ const NATIVE_LOOP_END_TOLERANCE := 0.02
 ## How much of the gap between the playhead and the music is closed each frame (see
 ## _follow_audio_clock): small enough to smooth out the mixer's chunky position reports.
 const CLOCK_FOLLOW := 0.1
-## A bigger gap than this (seconds) is a seek or start still in flight, not drift: ignored.
+## A bigger gap than this (seconds) may be a seek still taking effect: ignored for a few frames...
 const CLOCK_TRUST := 0.25
+## ...but if it lasts this many frames, the audio really is elsewhere: the playhead goes to it.
+const CLOCK_PATIENCE := 6
+## No mix for this long (seconds) means the audio isn't running (a web page waiting for a click or
+## tap before it may play sound, a stalled device): the playhead holds still, so no beats fire
+## for music nobody hears, and the timeline starts when the sound does.
+const CLOCK_STALL := 0.1
 ## AudioStreamPlayer2D.max_distance while Chirp applies the roll-off (effectively no limit).
 const ROLLOFF_FAR := 1.0e7
 
@@ -99,6 +105,8 @@ var _label := "" # how the profiler names it: the event path it was created from
 var _virtual := false # players paused to save the mixer's work; the instance keeps running
 var _parent_id := 0 # nested events: the instance playing this one
 var _clock_nudge := 0.0 # seconds added to the next timeline advance, to follow the music
+var _clock_doubt := 0 # frames in a row the music has been more than CLOCK_TRUST away
+var _clock_hold := false # the audio isn't running: don't advance the timeline this frame
 var _processed_usec := 0 # when the playhead last moved, for the audible position between frames
 var _beat_waiters: Array[Dictionary] = [] # call_on_beat(): {callback, bar_only, audible}
 
@@ -427,8 +435,9 @@ func _process(delta: float) -> void:
 			_trigger(pending.instrument)
 
 	if _timeline:
-		_advance_timeline(maxf(delta + _clock_nudge, 0.0))
+		_advance_timeline(0.0 if _clock_hold else maxf(delta + _clock_nudge, 0.0))
 		_clock_nudge = 0.0
+		_clock_hold = false
 		_processed_usec = Time.get_ticks_usec()
 		_sync_entries()
 		_arm_region_loops()
@@ -671,6 +680,7 @@ func _schedule_transition(from: float, to: float) -> void:
 
 
 func _jump_to(time: float) -> void:
+	_clock_doubt = 0
 	_bridge = {}
 	_playhead = time
 	_jumped = true
@@ -809,6 +819,9 @@ func _follow_audio_clock() -> void:
 				or not voice.player.playing or voice.player.stream_paused \
 				or not is_equal_approx(voice.player.pitch_scale, 1.0):
 			continue
+		if AudioServer.get_time_since_last_mix() > CLOCK_STALL:
+			_clock_hold = true
+			return
 		var length: float = voice.player.stream.get_length()
 		var heard: float = voice.player.get_playback_position() + AudioServer.get_time_since_last_mix()
 		var expected := _playhead - entry.start + voice.start_shift
@@ -822,7 +835,12 @@ func _follow_audio_clock() -> void:
 		if period > 0.0:
 			error = fposmod(error + period / 2.0, period) - period / 2.0 # it may have wrapped just now
 		if absf(error) > CLOCK_TRUST:
-			continue
+			_clock_doubt += 1
+			if _clock_doubt >= CLOCK_PATIENCE:
+				_playhead += error # straight to the music (beats in between are skipped or repeated)
+				_clock_doubt = 0
+			return
+		_clock_doubt = 0
 		_clock_nudge = error * CLOCK_FOLLOW
 		return
 

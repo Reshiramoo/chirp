@@ -694,6 +694,14 @@ One page per class, in the layout of Godot's class reference.
   heard even if the audio starts late. A stall of over a second (or the app returning from the
   background) isn't caught up on; sounds re-sync at the next loop or jump.
 - **Members starting with `_`** are internal and may change between versions.
+- **Web exports.** Browsers don't let a page play sound until the player clicks, taps or presses
+  a key, so nothing is heard before that (Godot starts the audio on the first input). Start the
+  game on a "click to play" screen. Meanwhile timelines hold still, so beats only fire once the
+  music is actually playing. Godot plays web audio as browser samples by default
+  (`audio/general/default_playback_type.web`), which skips its own mixer: bus meters read silent,
+  so `LEVEL` ducking and the profiler's meters don't work there, and per Godot's documentation bus
+  effects aren't applied. Switch that setting to `Stream` if you need them, at the cost of more
+  latency.
 - **MP3 padding.** MP3s without a LAME/Xing header (e.g. from Logic Pro) play with their encoder
   padding, so they start late and can't loop cleanly. Use Ogg Vorbis; see
   [Audio formats](#audio-formats).
