@@ -420,6 +420,10 @@ $Logo.scale = Vector2.ONE * (1.1 - 0.1 * music.get_beat_phase())      # pulses o
 music.call_on_beat(func(bar, beat): spawn_wave(), ChirpMarker.Quantization.BAR)  # next bar, once
 ```
 
+To check sync, add a [ChirpBeatMonitor](docs/classes/ChirpBeatMonitor.md) to your UI and give it
+the instance before starting it: it shows the beat being heard, the bar, how far Chirp is from the
+music, and a flash for every sound. It can also record the game's mix to a WAV file.
+
 **Automation lanes:** volume and pitch can follow the timeline too. In the **Chirp Event** dock,
 **Add → Add Volume Automation** (or Pitch) adds a lane for the whole event, below the instruments;
 right-click an instrument → **Add Volume Automation (this instrument)** adds one for that instrument
@@ -660,6 +664,7 @@ One page per class, in the layout of Godot's class reference.
 | Class | Inherits | Brief |
 |---|---|---|
 | [ChirpEmitter2D](docs/classes/ChirpEmitter2D.md) | Node2D | Plays an event at its position, on triggers. |
+| [ChirpBeatMonitor](docs/classes/ChirpBeatMonitor.md) | Control | On-screen metronome (and optional mix recorder) for checking music sync. |
 | [ChirpEmitter3D](docs/classes/ChirpEmitter3D.md) | Node3D | Plays an event at its position, on triggers. |
 | [ChirpListener2D](docs/classes/ChirpListener2D.md) | Node2D | Where Chirp measures distance and direction from. |
 | [ChirpListener3D](docs/classes/ChirpListener3D.md) | Node3D | Where Chirp measures distance and direction from. |
