@@ -43,6 +43,7 @@ No native libraries, so it runs anywhere Godot does (desktop, Android, iOS, web)
 - [Class reference](#class-reference)
 - [Troubleshooting](#troubleshooting)
 - [Limitations](#limitations)
+- [Support](#support)
 - [License](#license)
 
 ## Requirements
@@ -644,6 +645,12 @@ One page per class, in the layout of Godot's class reference.
   a frame (about 17 ms at 60 FPS), not a sample.
 - **Members starting with `_`** are internal and may change between versions.
 - Exported games and mobile devices are not yet tested.
+
+## Support
+
+Found a bug or have an idea? [Open an issue](https://github.com/Reshiramoo/chirp/issues) and mention
+your Godot and Chirp versions. For anything else, email
+[support@reshiramoo.com](mailto:support@reshiramoo.com).
 
 ## License
 
