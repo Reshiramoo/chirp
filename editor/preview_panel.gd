@@ -25,14 +25,14 @@ var _play: Button
 var _stop: Button
 var _stop_now: Button
 var _key_off: Button
-var _parameters: GridContainer
+var _parameters: VBoxContainer # one row per parameter: name, control, value
 var _log: RichTextLabel
 var _log_lines: Array[String] = []
 
 
 func setup(chirp: Node) -> void:
 	_chirp = chirp
-	custom_minimum_size.x = 280 * EditorInterface.get_editor_scale()
+	custom_minimum_size.x = 170 * EditorInterface.get_editor_scale()
 	transport = HBoxContainer.new()
 	_play = _button("Play", "Play", "Play (Space)", play)
 	_stop = _button("", "Stop", "Stop with the fade-out (Space)", func() -> void: stop(true))
@@ -45,8 +45,7 @@ func setup(chirp: Node) -> void:
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	add_child(scroll)
-	_parameters = GridContainer.new()
-	_parameters.columns = 3
+	_parameters = VBoxContainer.new()
 	_parameters.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(_parameters)
 	add_child(_section_label("Log"))
@@ -247,18 +246,15 @@ func _load_snapshot(snapshot: ChirpSnapshot) -> void:
 	_clear_children(_parameters)
 	_rows.clear()
 	_add_header("Snapshot")
-	var label := Label.new()
-	label.text = "Intensity"
-	_parameters.add_child(label)
+	var label := _name_label("Intensity")
 	_intensity = _slider(0.0, 1.0, 0.01, 1.0)
-	var value_label := Label.new()
+	var value_label := _value_label()
 	value_label.text = "1.00"
 	_intensity.value_changed.connect(func(value: float) -> void:
 		value_label.text = "%.2f" % value
 		if _snapshot_instance:
 			_snapshot_instance.intensity = value)
-	_parameters.add_child(_intensity)
-	_parameters.add_child(value_label)
+	_add_row([label, _intensity, value_label])
 	_add_global_parameters()
 
 
@@ -273,15 +269,10 @@ func _add_global_parameters() -> void:
 
 
 func _add_parameter_row(parameter: ChirpParameter, global: bool) -> void:
-	var label := Label.new()
-	label.text = parameter.name
-	label.clip_text = true
-	label.custom_minimum_size.x = 60 * EditorInterface.get_editor_scale()
-	_parameters.add_child(label)
+	var label := _name_label(parameter.name)
 	var current: float = _chirp.parameters.get_value(parameter.name) if global \
 		else _local_values.get(parameter.name, parameter.clamp_value(parameter.default_value))
-	var value_label := Label.new()
-	value_label.custom_minimum_size.x = 56 * EditorInterface.get_editor_scale()
+	var value_label := _value_label()
 	var row := {value_label = value_label}
 	if not global or not _rows.has(parameter.name.to_lower()): # a local parameter shadows a global one
 		_rows[parameter.name.to_lower()] = row
@@ -290,8 +281,9 @@ func _add_parameter_row(parameter: ChirpParameter, global: bool) -> void:
 		var note := Label.new()
 		note.text = "built-in: %s" % ChirpParameter.BuiltIn.keys()[parameter.built_in].to_lower()
 		note.add_theme_color_override(&"font_color", _theme_color(&"disabled_font_color"))
-		_parameters.add_child(note)
-		_parameters.add_child(Control.new())
+		note.clip_text = true
+		note.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_add_row([label, note])
 	elif parameter.kind == ChirpParameter.Kind.LABELED:
 		var options := OptionButton.new()
 		for option in parameter.labels:
@@ -300,16 +292,14 @@ func _add_parameter_row(parameter: ChirpParameter, global: bool) -> void:
 		options.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		options.item_selected.connect(func(index: int) -> void: set_parameter_value(parameter.name, float(index)))
 		row.options = options
-		_parameters.add_child(options)
-		_parameters.add_child(value_label)
+		_add_row([label, options, value_label])
 	else:
 		var step := 1.0 if parameter.kind == ChirpParameter.Kind.DISCRETE else (parameter.get_max() - parameter.get_min()) / 1000.0
 		var slider := _slider(parameter.get_min(), parameter.get_max(), step, current)
 		value_label.text = _format(current)
 		slider.value_changed.connect(func(value: float) -> void: set_parameter_value(parameter.name, value))
 		row.slider = slider
-		_parameters.add_child(slider)
-		_parameters.add_child(value_label)
+		_add_row([label, slider, value_label])
 
 
 func _slider(lo: float, hi: float, step: float, value: float) -> HSlider:
@@ -320,14 +310,39 @@ func _slider(lo: float, hi: float, step: float, value: float) -> HSlider:
 	slider.value = value
 	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	slider.custom_minimum_size.x = 100 * EditorInterface.get_editor_scale()
+	slider.custom_minimum_size.x = 50 * EditorInterface.get_editor_scale()
 	return slider
 
 
 func _add_header(text: String) -> void:
-	_parameters.add_child(_section_label(text))
-	_parameters.add_child(Control.new())
-	_parameters.add_child(Control.new())
+	var header := _section_label(text)
+	header.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_parameters.add_child(header)
+
+
+func _add_row(cells: Array) -> void:
+	var row := HBoxContainer.new()
+	for cell: Control in cells:
+		row.add_child(cell)
+	_parameters.add_child(row)
+
+
+## A parameter's name: a fixed width so the sliders line up, the full name in the tooltip.
+func _name_label(text: String) -> Label:
+	var label := Label.new()
+	label.text = text
+	label.tooltip_text = text
+	label.mouse_filter = Control.MOUSE_FILTER_PASS
+	label.clip_text = true
+	label.custom_minimum_size.x = 70 * EditorInterface.get_editor_scale()
+	return label
+
+
+func _value_label() -> Label:
+	var label := Label.new()
+	label.custom_minimum_size.x = 44 * EditorInterface.get_editor_scale()
+	label.clip_text = true
+	return label
 
 
 func _section_label(text: String) -> Label:
@@ -341,9 +356,8 @@ func _add_note(text: String) -> void:
 	var note := Label.new()
 	note.text = text
 	note.add_theme_color_override(&"font_color", _theme_color(&"disabled_font_color"))
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_parameters.add_child(note)
-	_parameters.add_child(Control.new())
-	_parameters.add_child(Control.new())
 
 
 ## Chirp's warnings and errors while auditioning, in the log.

@@ -77,7 +77,7 @@ func setup(plugin: EditorPlugin, chirp: Node) -> void:
 
 	var box := VBoxContainer.new()
 	add_child(box)
-	var toolbar := HBoxContainer.new()
+	var toolbar := HFlowContainer.new() # wraps onto a second line when the dock is narrow
 	box.add_child(toolbar)
 	_title = Button.new()
 	_title.flat = true
@@ -95,7 +95,7 @@ func setup(plugin: EditorPlugin, chirp: Node) -> void:
 	toolbar.add_child(_preview.transport)
 	_status = Label.new()
 	_status.add_theme_color_override(&"font_color", EditorInterface.get_editor_theme().get_color(&"disabled_font_color", &"Editor"))
-	_status.custom_minimum_size.x = 170 * EditorInterface.get_editor_scale()
+	_status.custom_minimum_size.x = 120 * EditorInterface.get_editor_scale()
 	_status.clip_text = true
 	toolbar.add_child(_status)
 	_issues_button = Button.new()
@@ -476,12 +476,9 @@ func _add_marker(kind: int, at: float) -> void:
 
 # --- tempo --------------------------------------------------------------------------
 
-func _build_tempo_controls(toolbar: HBoxContainer) -> void:
+func _build_tempo_controls(toolbar: Container) -> void:
 	_tempo_box = HBoxContainer.new()
 	toolbar.add_child(_tempo_box)
-	var label := Label.new()
-	label.text = "Tempo"
-	_tempo_box.add_child(label)
 	_bpm = SpinBox.new()
 	_bpm.min_value = 20.0
 	_bpm.max_value = 400.0
